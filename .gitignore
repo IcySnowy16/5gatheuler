@@ -1,0 +1,22 @@
+# Secrets and per-machine state never belong in the repo.
+# The bot keeps all of these in %LOCALAPPDATA%\ScheduleMatcher (Windows) or
+# ~/.schedule-matcher (Linux) - see the README.
+.env
+*.env
+!.env.example
+
+# Legacy pickle database: real names and availability
+*.pkl
+
+# Runtime artefacts
+proof/
+debug/
+*.log
+schedule_matcher.db*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
