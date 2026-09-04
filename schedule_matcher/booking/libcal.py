@@ -332,6 +332,38 @@ def _clock(text: str) -> time | None:
         return None
 
 
+async def confirm_booking(lid: int, gid: int, item_id: int,
+                          start: datetime, end: datetime) -> str:
+    """Is this booking still on the site? 'held', 'gone' or 'unknown'.
+
+    There is no page on this LibCal that lists a person's bookings - twenty
+    endpoints were probed and every one either 404s or is the ordinary
+    availability grid, and the grid's slots carry no owner. What the grid
+    does say, reliably, is whether that desk is taken at that time. If the
+    slot we believe we hold is FREE, the booking is definitely gone -
+    cancelled on the website, or never made. That is the case worth
+    catching, because it is the one where our own record lies.
+
+    'held' therefore means "someone has it, consistent with our record", not
+    "proved yours". Only the check-in code proves ownership.
+    """
+    if not (lid and gid and item_id):
+        return "unknown"
+    try:
+        grid = await fetch_grid(lid, gid, start.date())
+    except Exception:
+        return "unknown"                    # site down: never contradict on a guess
+    cells = grid.get(int(item_id))
+    if not cells:
+        return "unknown"
+    covering = [c for c in cells if c.start < end and c.end > start]
+    if not covering:
+        return "unknown"                    # outside the published day
+    if all(c.state == FREE for c in covering):
+        return "gone"
+    return "held"
+
+
 async def probe_code(email: str, code: str) -> dict:
     """Ask the site what this code belongs to.
 
@@ -340,9 +372,9 @@ async def probe_code(email: str, code: str) -> dict:
     bookings). Nothing is guessed: a field stays None when the site did not
     say it.
     """
-    out = {"known": False, "checked_in": False, "start": None, "end": None,
-           "space": None, "location": None, "checked_in_at": None,
-           "message": ""}
+    out = {"known": False, "checked_in": False, "finished": False,
+           "start": None, "end": None, "space": None, "location": None,
+           "checked_in_at": None, "message": ""}
     async with _client() as client:
         resp = await client.post(
             "/r/checkin",
@@ -363,9 +395,14 @@ async def probe_code(email: str, code: str) -> dict:
     text = re.sub(r"\s+", " ", BeautifulSoup(body, "html.parser").get_text(" ")).strip()
     out["message"] = text[:400]
 
-    if _UNKNOWN_CODE_RE.search(text):
+    if _UNKNOWN_CODE_RE.search(text) or re.search(r"invalid value", text, re.I):
+        # "Invalid value." is what an empty or malformed code gets. Treating
+        # that as a known booking made a typo look like a real reservation.
         return out                                  # code means nothing here
     out["known"] = True
+    # "This booking has already been Checked Out" - a real code, but the
+    # session is over. Worth saying plainly instead of retrying forever.
+    out["finished"] = bool(re.search(r"already been Checked ?Out", text, re.I))
 
     if resp.status_code < 400:
         out["checked_in"] = True

@@ -7,6 +7,7 @@ user id. The booking commands live in schedule_matcher.booking.handlers.
 from __future__ import annotations
 
 import logging
+import re
 import random
 import string
 from datetime import datetime, timedelta
@@ -709,6 +710,28 @@ def _menu_actions():
 MENU_ACTIONS = {}
 
 
+class _RedactToken(logging.Filter):
+    """Keep the bot token out of the log file.
+
+    python-telegram-bot talks to api.telegram.org/bot<TOKEN>/method, and httpx
+    logs that URL at INFO. Anyone handed a log - or a /developer dump - would
+    have had the token, which is enough to take over the bot.
+    """
+
+    _PAT = re.compile(r"bot\d+:[A-Za-z0-9_\-]{20,}")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if "bot" in msg and ":" in msg:
+            cleaned = self._PAT.sub("bot<token hidden>", msg)
+            if cleaned != msg:
+                record.msg, record.args = cleaned, ()
+        return True
+
+
 def main() -> None:
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -718,7 +741,14 @@ def main() -> None:
                                        backupCount=2, encoding="utf-8")
     file_handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    file_handler.addFilter(_RedactToken())
     logging.getLogger().addHandler(file_handler)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(_RedactToken())
+    # Every poll logged the full API URL, token and all - 9,692 lines of it in
+    # three log files, and /developer prints log tails to developers. The
+    # filter above catches any that slip through; this stops the flood.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     for note in config.warnings():
         log.warning(note)
     storage.conn()  # opens DB, runs schema + pickle migration

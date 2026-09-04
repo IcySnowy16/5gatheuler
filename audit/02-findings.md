@@ -219,3 +219,59 @@ was a missing `context` argument. Beyond the one-line fix:
 
 Still open from the list above: H3 (two sources of truth for booking length),
 H4, M5 (timezone), M6-M12, L13-L17.
+
+---
+
+## Fixed 4 Sep: four faults found by measuring, not reading
+
+**H18. A check-in took 74 seconds, 59 of them doing nothing.**
+Profiling each phase showed the work finished in ~11 s and `browser.close()`
+then blocked for 9-50 s (highly variable, and Chromium's own shutdown - no
+ordering of page/context/browser close avoids it; leaving it to the
+`with sync_playwright()` block is the same or worse). Two changes: the page
+now waits for the check-in POST to answer rather than for `networkidle`,
+which that page never reaches; and the answer is handed back through a queue
+the moment the screenshot exists, leaving the browser to shut down in its own
+thread. Measured before and after, same codes: **74 s -> 4.1 s**.
+
+**H19. A wrong code was treated as "too early" and saved anyway.**
+`/checkin ABC123` saved the code against whatever single active booking
+existed, called the site, and on any failure said "Too early? I'll keep
+trying". The site had actually said *"Unable to find booking matching code"*.
+So a typo silently overwrote a good booking's code and promised retries that
+could never work. `/checkin` now asks the site what the code is **before**
+touching anything, and distinguishes what the site distinguishes:
+
+```
+3WQ  -> wrong code: say so, save nothing, never retry
+4K7  -> real, but already checked out: say the session is over
+3WT  -> real: LIBLWNL-AK-05 13:45-15:00, filed against that booking
+```
+
+The same answer, "Unable to find booking matching code", also comes back for
+a booking that is not live on the site yet, so the reply says so rather than
+asserting a typo.
+
+**H20. The bot token was written to the log 9,692 times.**
+python-telegram-bot polls `api.telegram.org/bot<TOKEN>/getUpdates` and httpx
+logs the URL at INFO; `bot.log` and its two rotations carried the token in
+full, and `/developer` prints log tails. A filter now redacts it from every
+handler, and httpx's polling chatter is silenced (which also stops the log
+churning through 1 MB rotations). Existing log files still contain it -
+delete them, or treat the token as compromised and reissue it.
+
+**M21. Cancel and move trusted the local database completely.**
+There is no page on this LibCal that lists a person's bookings: twenty
+endpoints were probed, and the availability grid's slots carry no owner
+(`keys: checksum, className, end, itemId, start`). What the grid does prove
+is whether a desk is taken at a time - so `confirm_booking()` checks each
+stored booking against it before `/cancelbooking`, `/move` or `/bookings`
+offer it. A booking the site shows as free again is marked cancelled and
+reported, instead of being offered as something to cancel. Verified: a free
+cell returns `gone`, a taken one `held`, and a past day returns `unknown`
+rather than guessing.
+
+For someone whose bookings were all made on the website, the honest answer is
+that the bot cannot enumerate them - so those commands now say so and point
+at the two things that do work: the check-in code, or pasting the
+confirmation email.

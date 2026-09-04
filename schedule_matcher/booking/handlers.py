@@ -1337,6 +1337,22 @@ async def _ask_which_booking(message, context, fields: dict, rows) -> None:
         reply_markup=InlineKeyboardMarkup(kb))
 
 
+async def _proof_only(bot, user_id: int, booking, code: str) -> None:
+    """Photograph a check-in that has already happened."""
+    row = storage.get_user(user_id)
+    email = row["email"] if row else None
+    if not email:
+        return
+    ok, _msg, path = await browser.checkin_now(email, code, str(booking["id"]))
+    if path and ok:
+        await _send_checkin_proof(bot, user_id, booking, path)
+    elif path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 async def _attach_code(update, context, code: str, rows) -> bool:
     """Ask the site what this code is for, and file it correctly.
 
@@ -1359,8 +1375,18 @@ async def _attach_code(update, context, code: str, rows) -> bool:
 
     if not found["known"]:
         await update.effective_message.reply_text(
-            f"The library doesn't recognise {code}: {found['message'][:150]}\n\n"
-            "Check the code in your confirmation email - I haven't saved it.")
+            f"Wrong code - the library has no booking for {code}.\n\n"
+            "Check it against your confirmation email. I have not saved it and "
+            "I will not retry: a code the site does not know will not start "
+            "working later.\n\n"
+            "(The same answer comes back for a booking that is not live on the "
+            "site yet, so if you have just made it, give it a minute.)")
+        return True
+
+    if found["finished"]:
+        await update.effective_message.reply_text(
+            f"{code} is a real code, but that booking is already checked out - "
+            "it is over, so there is nothing to check in to.")
         return True
 
     start = found["start"]
@@ -1391,6 +1417,12 @@ async def _attach_code(update, context, code: str, rows) -> bool:
     details = (f"{space}\n{where}\n{start:%a %d %b, %H:%M} - {end:%H:%M}")
     if found["checked_in"]:
         storage.update_booking(match["id"], status="checked_in")
+        # probe_code checks in as a side effect, so there is no screenshot yet.
+        # Take one in the background: asking the site again just answers
+        # "Already Checked In", which is exactly the proof worth keeping.
+        tasks.spawn(_proof_only(context.bot, user_id, storage.get_booking(match["id"]), code),
+                    bot=context.bot, user_id=user_id, feature="the check-in photo",
+                    notify=None)
         await update.effective_message.reply_text(
             f"✅ Checked in.\n\n{details}\n\n"
             f"Code {code} saved. Check out with /cancelbooking when you leave "
@@ -1458,17 +1490,63 @@ async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _ask_which_booking(update.message, context, fields, rows)
 
 
-async def cmd_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rows = storage.list_bookings(update.effective_user.id, active_only=False)[-10:]
+NO_LISTING_HINT = (
+    "The library has no page that lists your bookings, so I only know the "
+    "ones I made or that you told me about. Booked on the website? Send me "
+    "the code - /checkin ABC123 14:30 - or just paste the confirmation "
+    "email here, and I will look it up and manage it from then on.")
+
+
+async def _live_bookings(user_id: int) -> tuple[list, list]:
+    """Active bookings, checked against the site rather than trusted.
+
+    Returns (still there, disappeared). Anything the site says is free again
+    was cancelled somewhere else, so the record is corrected here instead of
+    being offered as something to cancel or move.
+    """
+    rows = storage.list_bookings(user_id)
     if not rows:
-        await update.effective_message.reply_text("No bookings recorded yet. Try /book.")
+        return [], []
+    checks = await asyncio.gather(*[
+        libcal.confirm_booking(
+            r["lid"], r["gid"], r["item_id"],
+            datetime.strptime(r["start_ts"], storage.FMT),
+            datetime.strptime(r["end_ts"], storage.FMT))
+        for r in rows], return_exceptions=True)
+    live, gone = [], []
+    for row, verdict in zip(rows, checks):
+        if verdict == "gone":
+            storage.update_booking(row["id"], status="cancelled")
+            gone.append(row)
+        else:                       # 'held', 'unknown', or the check failed
+            live.append(row)
+    return live, gone
+
+
+def _gone_note(gone) -> str:
+    if not gone:
+        return ""
+    which = ", ".join(f"{r['room_name']} {r['start_ts'][-5:]}" for r in gone)
+    return (f"\n\n(The library no longer has {which} - cancelled elsewhere, "
+            "so I have removed it.)")
+
+
+async def cmd_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    live, gone = await _live_bookings(user_id)          # correct the record first
+    live_ids = {r["id"] for r in live}
+    rows = storage.list_bookings(user_id, active_only=False)[-10:]
+    if not rows:
+        await update.effective_message.reply_text(
+            "No bookings recorded yet. Try /book.\n\n" + NO_LISTING_HINT)
         return
     lines = []
     for r in rows:
         code = f" - code {r['checkin_code']}" if r["checkin_code"] else " - no code yet"
+        mark = " - confirmed on the site" if r["id"] in live_ids else ""
         lines.append(f"#{r['id']} {r['room_name']} ({r['location']}) "
-                     f"{r['start_ts']} to {r['end_ts'][-5:]} [{r['status']}]{code}")
-    await update.effective_message.reply_text("\n".join(lines))
+                     f"{r['start_ts']} to {r['end_ts'][-5:]} [{r['status']}]{code}{mark}")
+    await update.effective_message.reply_text("\n".join(lines) + _gone_note(gone))
 
 
 async def cmd_scheduled(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1488,14 +1566,17 @@ async def cmd_scheduled(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _pick_booking(update: Update, context: ContextTypes.DEFAULT_TYPE,
                         action: str, verb: str) -> None:
-    rows = storage.list_bookings(update.effective_user.id)
+    rows, gone = await _live_bookings(update.effective_user.id)
     if not rows:
-        await update.effective_message.reply_text("No active bookings.")
+        await update.effective_message.reply_text(
+            ("Nothing to " + verb + " - the library no longer has any of the "
+             "bookings I knew about." if gone else "No active bookings.")
+            + "\n\n" + NO_LISTING_HINT)
         return
     kb = [[InlineKeyboardButton(f"{r['room_name']} {r['start_ts']}",
                                 callback_data=f"bk|{action}|{r['id']}")] for r in rows]
     await flows.start(update, context, flows.LIBRARY,
-                      f"Which booking do you want to {verb}?",
+                      f"Which booking do you want to {verb}?" + _gone_note(gone),
                       reply_markup=InlineKeyboardMarkup(kb))
 
 
@@ -1576,23 +1657,29 @@ async def cmd_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"(the window shuts at {start + timedelta(minutes=15):%H:%M}).")
         return
 
-    # Just a code: save it against the right booking, then use it if we can.
+    # Just a code: ask the site what it belongs to BEFORE saving anything.
+    # Saving first and guessing "too early?" was wrong twice over - it filed a
+    # rejected code against an unrelated booking, and promised retries for a
+    # code the site had just said it did not know. The site names the space
+    # and the times when the code is real, so let it do the talking.
+    if await _attach_code(update, context, code, rows):
+        return
+
+    # The site knew the code but told us nothing useful about it - fall back.
     if len(rows) > 1:
         await _ask_which_booking(update.effective_message, context,
                                  {"checkin_code": code}, rows)
         return
     if rows:
         _apply_capture(rows[0]["id"], {"checkin_code": code})
-
-    if rows:
         ok, msg = await checkin_booking(context.bot, update.effective_user.id,
                                         rows[0], code)
     else:
         ok, msg = await libcal.checkin(email_addr, code)
     text = ("Checked in. " if ok else "Saved the code, but check-in failed: ") + msg
     if not ok:
-        text += ("\n\nToo early? I'll keep trying automatically from 2 minutes "
-                 "before it starts.")
+        text += ("\n\nIf the booking has not started, I will check you in "
+                 "automatically from 2 minutes before it does.")
     await update.effective_message.reply_text(text)
 
 
@@ -1636,8 +1723,7 @@ async def checkin_booking(bot, user_id: int, booking, code: str | None = None
     if not email or not code:
         return False, "I need both your email and the booking's code first."
 
-    ok, message, path = await asyncio.to_thread(
-        browser.checkin_with_proof, email, code, str(booking["id"]))
+    ok, message, path = await browser.checkin_now(email, code, str(booking["id"]))
     if path is None:                      # browser unavailable - do it plainly
         ok, message = await libcal.checkin(email, code)
 

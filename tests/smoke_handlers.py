@@ -195,8 +195,10 @@ async def main():
             fn = ask.on_default_button
         else:
             fn = B.on_callback
-        # re-taking a hold drives a real browser; give it room
-        budget = 180 if data.startswith(("bk|hagain", "bk|hallback")) else 45
+        # anything that drives a real browser needs room: re-taking a hold,
+        # and checking in (which photographs the result).
+        budget = (180 if data.startswith(("bk|hagain", "bk|hallback", "bk|ci"))
+                  else 45)
         results.append(await try_call(
             f"[{data}]", lambda fn=fn, data=data:
             fn(Update(query=Query(data)), Context()), timeout=budget))

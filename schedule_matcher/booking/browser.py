@@ -18,6 +18,7 @@ your saved session, to watch or repair the flow manually.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -84,6 +85,19 @@ def _fmt_time(dt: datetime) -> str:
 
 def _fmt_title_day(dt: datetime) -> str:
     return f"{dt.strftime('%A, %B')} {dt.day}, {dt.year}"      # Tuesday, August 25, 2026
+
+
+# Chromium spends 9-50 s shutting down on Windows whatever we do; these cut
+# it to about half that, and stop a headless browser doing background work we
+# never asked for - which matters on a laptop running other things.
+LAUNCH_ARGS = [
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-component-update",
+    "--no-first-run",
+]
 
 
 def _state_path(user_id: int) -> Path:
@@ -178,7 +192,7 @@ def harvest_names(user_id: int, username: str, password: str,
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not config.HEADFUL)
+        browser = p.chromium.launch(headless=not config.HEADFUL, args=LAUNCH_ARGS)
         state = _state_path(user_id)
         context = browser.new_context(storage_state=str(state) if state.exists() else None,
                                       user_agent=UA)
@@ -327,7 +341,7 @@ def book(user_id: int, username: str, password: str, profile: dict,
     note(f"book {item_id} {start:%Y-%m-%d %H:%M}-{end:%H:%M} lid={lid} gid={gid}"
          + (" [dry run]" if dry_run else ""))
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not config.HEADFUL)
+        browser = p.chromium.launch(headless=not config.HEADFUL, args=LAUNCH_ARGS)
         state = _state_path(user_id)
         context = browser.new_context(
             storage_state=str(state) if state.exists() else None, user_agent=UA)
@@ -522,16 +536,23 @@ CHECKIN_FAIL_RE = re.compile(
     r"unable to|invalid|not found|no booking|cannot|expired", re.I)
 
 
-def checkin_with_proof(email: str, code: str,
-                       tag: str = "") -> tuple[bool, str, str | None]:
-    """(checked in, what the site said, path to the screenshot or None)."""
+def checkin_with_proof(email: str, code: str, tag: str = "",
+                       sink=None) -> tuple[bool, str, str | None]:
+    """(checked in, what the site said, path to the screenshot or None).
+
+    `sink` is a queue that receives the answer the instant it is known, before
+    the browser is closed. Closing a headless Chromium on this machine takes
+    9-50 s (measured, and it is Chromium's shutdown, not ours - no ordering of
+    page/context/browser close avoids it). Waiting for that made a check-in
+    take 74 s, against a window only minutes wide.
+    """
     from playwright.sync_api import sync_playwright
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     png = config.PROOF_DIR / f"checkin-{tag or code}-{stamp}.png"
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=not config.HEADFUL)
+            browser = p.chromium.launch(headless=not config.HEADFUL, args=LAUNCH_ARGS)
             context = browser.new_context(user_agent=UA)
             page = context.new_page()
             try:
@@ -546,24 +567,57 @@ def checkin_with_proof(email: str, code: str,
                                           email)
                 except Exception:
                     pass
-                page.click("#s-lc-checkin-button")
+                # Wait for the check-in POST itself, not for the page to go
+                # quiet: this page never reaches "networkidle", so waiting for
+                # it burned the full 30 s timeout on every check-in - 74 s in
+                # total, against a check-in window only 15 minutes wide.
                 try:
-                    page.wait_for_load_state("networkidle", timeout=30000)
+                    with page.expect_response(
+                            lambda r: "/r/checkin" in r.url
+                            and r.request.method == "POST", timeout=20000):
+                        page.click("#s-lc-checkin-button")
                 except Exception:
-                    pass
-                page.wait_for_timeout(1500)
+                    pass                     # the click landed; read the page
+                page.wait_for_timeout(800)   # let the answer render
                 body = re.sub(r"\s+", " ", page.locator("body").inner_text()).strip()
                 failed = bool(CHECKIN_FAIL_RE.search(body))
                 ok = bool(CHECKED_IN_RE.search(body)) and not failed
                 config.PROOF_DIR.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=str(png), full_page=True)
-                return ok, body[:400], str(png)
+                answer = (ok, body[:400], str(png))
+                if sink is not None:
+                    sink.put(answer)          # the caller can stop waiting now
+                return answer
             finally:
                 context.close()
                 browser.close()
     except Exception as e:
         log.warning("check-in screenshot failed: %s", e)
-        return False, f"could not open the check-in page ({type(e).__name__})", None
+        answer = (False,
+                  f"could not open the check-in page ({type(e).__name__})", None)
+        if sink is not None:
+            sink.put(answer)
+        return answer
+
+
+async def checkin_now(email: str, code: str, tag: str = "",
+                      timeout: float = 90) -> tuple[bool, str, str | None]:
+    """Check in and come back as soon as the library has answered.
+
+    The browser is left to shut down in its own thread afterwards; nobody is
+    waiting on it, and the process reaps it.
+    """
+    import queue
+    import threading
+
+    sink: queue.Queue = queue.Queue(maxsize=1)
+    threading.Thread(
+        target=checkin_with_proof, args=(email, code, tag), kwargs={"sink": sink},
+        daemon=True, name=f"checkin-{tag or code}").start()
+    try:
+        return await asyncio.to_thread(sink.get, True, timeout)
+    except Exception:
+        return False, "the check-in page did not answer in time", None
 
 
 def probe() -> None:
@@ -571,7 +625,7 @@ def probe() -> None:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=False, args=LAUNCH_ARGS)
         state = _state_path(0)
         context = browser.new_context(storage_state=str(state) if state.exists() else None,
                                       user_agent=UA)

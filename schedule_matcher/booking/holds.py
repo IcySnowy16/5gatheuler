@@ -32,6 +32,7 @@ from urllib.parse import urlencode
 
 from .. import config, storage, tasks
 from . import libcal
+from . import browser as browser_mod
 from .browser import BASE, SEL, UA, _state_path
 
 log = logging.getLogger(__name__)
@@ -242,7 +243,8 @@ async def create(user_id: int, username: str, password: str, lid: int, gid: int,
             f"This machine only has {free} MB of memory free, and a hold needs "
             f"about 270 MB. Close something, or release a hold: /holds")
     pw = await _driver()
-    browser = await pw.chromium.launch(headless=not config.HEADFUL)
+    browser = await pw.chromium.launch(headless=not config.HEADFUL,
+                                   args=browser_mod.LAUNCH_ARGS)
     state = _state_path(user_id)
     context = await browser.new_context(
         storage_state=str(state) if state.exists() else None, user_agent=UA)
