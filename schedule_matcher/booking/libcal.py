@@ -460,3 +460,72 @@ def _ajax_outcome(resp: httpx.Response) -> tuple[bool, str]:
 def _page_text(soup: BeautifulSoup) -> str:
     main = soup.select_one("#s-lc-public-main, .container, body") or soup
     return re.sub(r"\s+", " ", main.get_text(" ", strip=True))
+
+
+# --- Covering a long window with several spaces --------------------------
+#
+# A session longer than one booking allows does not need one desk to be free
+# for all of it. Taking what is free on one table and moving to another is
+# what people do by hand; these two functions work out where to move and when.
+
+def free_runs(cells: list[Cell]) -> list[tuple[datetime, datetime]]:
+    """Contiguous stretches this space can be booked for.
+
+    BUFFER counts as bookable: the 45 minutes before someone else's booking
+    block a start, but a booking may still END inside them.
+    """
+    runs: list[tuple[datetime, datetime]] = []
+    current: list[datetime] | None = None
+    for cell in sorted(cells, key=lambda c: c.start):
+        if cell.state in (FREE, BUFFER):
+            current = [cell.start, cell.end] if current is None else [current[0], cell.end]
+        elif current is not None:
+            runs.append((current[0], current[1]))
+            current = None
+    if current is not None:
+        runs.append((current[0], current[1]))
+    return runs
+
+
+def cover_span(grid: dict[int, list[Cell]], start: datetime, end: datetime,
+               cap_minutes: int) -> list[tuple[int, datetime, datetime]] | None:
+    """Tile [start, end) with as few bookings as possible, hopping desks.
+
+    Greedy: at each point take the space whose free run reaches furthest,
+    limited by the category's per-booking cap. Reaching furthest each time
+    gives the fewest segments, so a window needs only
+    ceil(duration / cap) moves when the grid allows it.
+
+    Returns [(item_id, from, to), …] in order, or None if some moment in the
+    window is free nowhere - better to say so than to book half a session.
+    """
+    runs = {iid: free_runs(cells) for iid, cells in grid.items()}
+    plan: list[tuple[int, datetime, datetime]] = []
+    used: list[int] = []
+    moment = start
+    while moment < end:
+        best: tuple[int, datetime, datetime] | None = None
+        for iid in sorted(runs):
+            # The site refuses two back-to-back bookings of the same facility,
+            # so the desk we are on cannot also take the next segment.
+            if plan and iid == plan[-1][0]:
+                continue
+            for run_start, run_end in runs[iid]:
+                if run_start <= moment < run_end:
+                    reach = min(run_end, end, moment + timedelta(minutes=cap_minutes))
+                    if reach <= moment:
+                        continue
+                    # Ties: prefer a desk already used (fewer strange seats),
+                    # then the lowest id, so the answer never depends on
+                    # dictionary order.
+                    better = (best is None or reach > best[2]
+                              or (reach == best[2] and iid in used
+                                  and best[0] not in used))
+                    if better:
+                        best = (iid, moment, reach)
+        if best is None:
+            return None
+        plan.append(best)
+        used.append(best[0])
+        moment = best[2]
+    return plan

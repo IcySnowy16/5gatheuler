@@ -75,6 +75,11 @@ Send `/menu` — everything is buttons; nothing has to be typed.
   re-checked immediately before submitting.
 - Modes on the same screen: **Book** now · **Schedule** for a window that has
   not opened · **Extended** for a session longer than one booking allows.
+- **Extended hops desks.** If no single table is free for the whole window,
+  the bot works out the fewest tables that cover it and says where you move
+  and when — `11:30-13:15 AK-14`, `13:15-14:45 AK-12`, "One move, at 13:15".
+  Spans needing a hop are marked `⇄2` while you choose the time. The first
+  leg is booked; the rest are choped so nobody takes them.
 - `/checkin` — check in now, or `/checkin ABC123 14:30` for a booking you made
   on the website yourself. Auto check-in runs at T−2 min, T and T+5 min.
 - **Paste the confirmation email** into the chat: the bot reads the space,

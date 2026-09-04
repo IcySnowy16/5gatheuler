@@ -474,6 +474,40 @@ async def _sched_availability(bk) -> str:
             + f"\n{free} space(s) still have free slots.")
 
 
+def _cap_minutes(bk) -> int:
+    """How long one booking may run in this category."""
+    cat = bk["locations"][bk["loc"]].categories[bk["cat"]]
+    _, hi = libcal.category_limits(cat.lid, cat.gid)
+    return catalog.max_each_minutes(cat.lid, cat.gid) or hi
+
+
+def _hop_plan(grid, bk, start, end):
+    """Segments covering [start, end) across desks, or None if impossible."""
+    if bk.get("only_item"):
+        return None                       # a favourite pins one desk
+    return libcal.cover_span(grid, start, end, _cap_minutes(bk))
+
+
+def _plan_lines(plan) -> str:
+    out = []
+    for item_id, seg_start, seg_end in plan:
+        mins = int((seg_end - seg_start).total_seconds() // 60)
+        length = f"{mins // 60}h{mins % 60:02d}" if mins >= 60 else f"{mins}min"
+        out.append(f"  {seg_start:%H:%M}-{seg_end:%H:%M}  "
+                   f"{_space_label(item_id)}  ({length})")
+    return "\n".join(out)
+
+
+def _moves_sentence(plan) -> str:
+    moves = len(plan) - 1
+    if moves <= 0:
+        return "No moving - one desk the whole time."
+    if moves == 1:
+        return f"One move, at {plan[1][1]:%H:%M}."
+    times = ", ".join(f"{seg[1]:%H:%M}" for seg in plan[1:])
+    return f"{moves} moves, at {times}."
+
+
 def _open_window(bk) -> tuple[datetime, datetime]:
     """The library's real opening and closing time on the chosen day."""
     cat = bk["locations"][bk["loc"]].categories[bk["cat"]]
@@ -528,10 +562,17 @@ async def _r_range(query, context, bk):
         fits = (libcal.spaces_free_span if bk["mode"] == "ext"
                 else libcal.spaces_free_for)
         options = []
+        hops = {}
         for s in sorted({s for cells in grid.values()
                          for s in libcal.bookable_starts(cells, step=step)}):
             if fits(grid, s, s + dur):
                 options.append(s)
+            elif bk["mode"] == "ext":
+                # Nothing covers it from one desk, but moving might.
+                plan = _hop_plan(grid, bk, s, s + dur)
+                if plan:
+                    options.append(s)
+                    hops[s] = len(plan)
         strip = _availability_strip(grid, bk["day"])
         toggle = ("30-min steps" if bk.get("fine") else "15-min steps", "bk|fine")
         if not options:
@@ -540,12 +581,18 @@ async def _r_range(query, context, bk):
                 f"{strip}\n\nTry a shorter duration or another day.",
                 reply_markup=_kb([toggle], nav=True, bk=bk))
             return
-        items = [(f"{s:%H:%M}-{(s + dur):%H:%M}", f"bk|rg|{s:%H%M}")
-                 for s in options[:60]]
+        items = []
+        for s in options[:60]:
+            label = f"{s:%H:%M}-{(s + dur):%H:%M}"
+            if s in hops:
+                label += f" ⇄{hops[s]}"      # needs that many desks
+            items.append((label, f"bk|rg|{s:%H%M}"))
         items.append(toggle)
+        note = ("\n⇄ = no single desk covers it; I'd split it across that many."
+                if hops else "")
         await query.edit_message_text(
             f"{bk['day']:%a %d %b}, {bk['dur']} min - pick your slot "
-            "(🟩 free / 🟥 taken):\n\n" + strip,
+            "(🟩 free / 🟥 taken):\n\n" + strip + note,
             reply_markup=_kb(items, per_row=3, bk=bk))
     else:
         opens, closes = _open_window(bk)
@@ -662,9 +709,23 @@ async def _r_space(query, context, bk):
         fits = (libcal.spaces_free_span if bk["mode"] == "ext"
                 else libcal.spaces_free_for)
         free = fits(grid, bk["start"], bk["end"])
+        plan = (_hop_plan(grid, bk, bk["start"], bk["end"])
+                if bk["mode"] == "ext" else None)
         if not free:
+            if plan:
+                bk["plan"] = plan
+                await query.edit_message_text(
+                    f"No single desk covers {bk['start']:%H:%M}-{bk['end']:%H:%M}, "
+                    f"but {len(plan)} together do:\n\n{_plan_lines(plan)}\n\n"
+                    f"{_moves_sentence(plan)}",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            f"Use these {len(plan)} desks", callback_data="bk|hop")],
+                        _nav_row()]))
+                return
             await query.edit_message_text(
-                "No space is free for that whole period - try a shorter one.",
+                "No space is free for that whole period, and I cannot cover it "
+                "by moving desks either - try a shorter one.",
                 reply_markup=_kb([], nav=True, bk=bk))
             return
         bk["free_spaces"] = free
@@ -675,6 +736,9 @@ async def _r_space(query, context, bk):
         space_items = [(_space_label(i), f"bk|sp|{i}") for i in free]
         space_items = _shortlist(bk, space_items)
         items = [(f"Any space - just {verb} one", "bk|any")] + space_items
+        if plan and len(plan) > 1:
+            bk["plan"] = plan
+            items.append((f"Or hop between {len(plan)} desks", "bk|hop"))
         await query.edit_message_text(
             f"{cat.label}, {bk['start']:%a %d %b %H:%M}-{bk['end']:%H:%M} - "
             f"{len(free)} space(s) free:",
@@ -770,6 +834,19 @@ async def _r_confirm(query, context, bk):
             "time from /holds.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Chope it", callback_data="bk|go")],
+                _nav_row()]))
+        return
+
+    if bk["mode"] == "ext" and bk.get("plan"):
+        segments = bk["plan"]
+        await query.edit_message_text(
+            f"Extended session across {len(segments)} desks?\n\n{head}\n\n"
+            f"{_plan_lines(segments)}\n\n{_moves_sentence(segments)}\n\n"
+            "The first is booked properly; the rest are choped so nobody takes "
+            "them, and you convert each from /holds.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Book the first + chope the rest",
+                                      callback_data="bk|go")],
                 _nav_row()]))
         return
 
@@ -927,7 +1004,13 @@ def _holds_keyboard(user_id: int) -> InlineKeyboardMarkup | None:
 
 async def _run_hold_plan(query, context, bk, user_id, profile, loc, cat):
     """/chope: hold one slot. /extendedbooking: book leg 1, hold the rest."""
-    legs = _ext_legs(bk) if bk["mode"] == "ext" else [(bk["start"], bk["end"])]
+    if bk["mode"] == "ext" and bk.get("plan"):
+        # A desk-hopping plan already says which space each leg belongs to.
+        legs = [(seg_start, seg_end) for _, seg_start, seg_end in bk["plan"]]
+        leg_rooms = [item_id for item_id, _, _ in bk["plan"]]
+    else:
+        legs = _ext_legs(bk) if bk["mode"] == "ext" else [(bk["start"], bk["end"])]
+        leg_rooms = [bk.get("room")] * len(legs)
     await query.edit_message_text(
         "Working on it - opening the library site" +
         (f" for {len(legs)} legs" if len(legs) > 1 else "") + "...")
@@ -936,7 +1019,8 @@ async def _run_hold_plan(query, context, bk, user_id, profile, loc, cat):
     for i, (start, end) in enumerate(legs, 1):
         grid = await libcal.fetch_grid(cat.lid, cat.gid, start.date())
         free = libcal.spaces_free_for(grid, start, end)
-        room = bk.get("room") if bk.get("room") in free else (free[0] if free else None)
+        wanted = leg_rooms[i - 1]
+        room = wanted if wanted in free else (free[0] if free else None)
         if room is None:
             lines.append(f"leg {i} {start:%H:%M}-{end:%H:%M}: no space free any more")
             continue
@@ -2302,8 +2386,15 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             else:
                 await _render(query, context, "space")
         elif action == "sp":
+            bk.pop("plan", None)          # a named desk, not a hop plan
             bk["room"] = int(parts[2])
             await _render(query, context, "fire" if bk["mode"] == "sched" else "confirm")
+        elif action == "hop":
+            if not bk.get("plan"):
+                await query.edit_message_text("That plan expired - pick the time again.")
+                return
+            bk["room"] = bk["plan"][0][0]
+            await _render(query, context, "confirm")
         elif action == "any":
             if bk["mode"] in LIVE_MODES:
                 bk["room"] = (bk.get("free_spaces") or [0])[0]
