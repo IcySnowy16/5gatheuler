@@ -2028,6 +2028,56 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(rules.rules_text()[:4000])
 
 
+async def cmd_refreshcatalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Re-read hours, notice periods and desk names from the site.
+
+    The catalogue normally comes from the copy shipped with the code, which is
+    fine because it rarely changes. Run this when the library alters its hours
+    or renames desks - and commit the refreshed `catalog_seed.json` so every
+    other machine gets the correction too.
+    """
+    if (update.effective_chat.type != "private"
+            or not storage.is_developer(update.effective_user.id)):
+        return
+    profile = _profile(update.effective_user.id)
+    if not profile:
+        await update.effective_message.reply_text(
+            "I need your NTU login to read the policy pages - run /setup first.")
+        return
+    await update.effective_message.reply_text(
+        "Re-reading every category from the site. This drives a browser "
+        "through all of them, so give it a few minutes.")
+
+    async def work():
+        meta = await catalog.refresh(update.effective_user.id,
+                                     profile["username"], profile["password"])
+        spaces = sum(len(e.get("spaces") or {}) for e in meta.values())
+        note = _write_seed(meta)
+        await update.effective_message.reply_text(
+            f"Catalogue refreshed: {len(meta)} categories, {spaces} spaces."
+            f"\n{note}")
+
+    tasks.spawn(work(), bot=context.bot, user_id=update.effective_user.id,
+                feature="refreshing the catalogue")
+
+
+def _write_seed(meta: dict) -> str:
+    """Save the refreshed catalogue over the copy that ships with the code."""
+    import json
+
+    try:
+        seed = {"categories": meta,
+                "room_names": storage.durable_get("libcal_room_names", {}) or {},
+                "probed_limits": storage.durable_get("category_limits", {}) or {}}
+        catalog.SEED_FILE.write_text(
+            json.dumps(seed, indent=1, sort_keys=True), encoding="utf-8")
+        return ("catalog_seed.json updated - commit it so other machines "
+                "start from the same numbers.")
+    except Exception as exc:                       # read-only install: no matter
+        log.warning("could not update the catalogue seed: %s", exc)
+        return "(Saved here, but I could not update catalog_seed.json.)"
+
+
 async def cmd_developer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Owner-only diagnostics. Silently ignored for anyone not on the list."""
     if (update.effective_chat.type != "private"
@@ -2475,6 +2525,7 @@ def register(application) -> None:
     application.add_handler(CallbackQueryHandler(on_availability_callback,
                                                  pattern=r"^av\|"))
     application.add_handler(CommandHandler("developer", cmd_developer))
+    application.add_handler(CommandHandler("refreshcatalog", cmd_refreshcatalog))
     application.add_handler(CallbackQueryHandler(on_booking_callback, pattern=r"^bk\|"))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, on_private_text))

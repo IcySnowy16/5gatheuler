@@ -14,14 +14,21 @@ The bot needs this because a scheduled booking is made for a day whose grid
 does not exist yet: without it we would offer 08:00-23:30 on a Sunday for a
 room that closes at 21:00 and is shut that day.
 
-`refresh()` re-derives it from the site; the cached copy lives in the kv table.
+`refresh()` re-derives it from the site; the answer lives in the durable
+table. A fresh install has none of it, and cannot go and get it either -
+the policy pages need a login. So the measured copy ships with the code in
+`catalog_seed.json` and is loaded on first use: a new laptop knows the hours,
+notice periods and desk names before anyone signs in. This is public library
+data, identical for every user.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
 from .. import storage
 
@@ -47,8 +54,36 @@ DEFAULT_HOURS = {
 WINDOW_OPENS = time(23, 59)
 
 
+SEED_FILE = Path(__file__).with_name("catalog_seed.json")
+
+
+def _load_seed() -> dict:
+    """Populate an empty catalogue from the copy shipped with the code.
+
+    Without this a fresh install believes every category takes 1 day's
+    notice, so a day-of booking would be scheduled to fire a day early.
+    """
+    try:
+        seed = json.loads(SEED_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:                      # missing or corrupt: carry on
+        log.warning("no catalogue seed: %s", exc)
+        return {}
+    meta = seed.get("categories") or {}
+    if not meta:
+        return {}
+    save(meta)
+    if seed.get("room_names"):
+        from . import libcal
+        libcal.remember_room_names({int(k): v
+                                    for k, v in seed["room_names"].items()})
+    if seed.get("probed_limits"):
+        storage.durable_set("category_limits", seed["probed_limits"])
+    log.info("catalogue seeded with %d categories", len(meta))
+    return meta
+
+
 def _meta() -> dict:
-    return storage.durable_get(CACHE_KEY, {}) or {}
+    return storage.durable_get(CACHE_KEY, {}) or _load_seed()
 
 
 def get(lid: int, gid: int) -> dict:

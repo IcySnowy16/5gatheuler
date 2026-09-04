@@ -34,7 +34,22 @@ in the database was seeded by hand from tonight's probes.
 **Fixed:** the catalogue, space names, probed limits, learned refusals and the
 bot inbox now live in a `durable` table with no expiry (only an `updated_at`
 stamp), and the existing cache entries were promoted into it on first run.
-`catalog.refresh()` still has no scheduled caller - that part remains open.
+**Also fixed 4 Sep:** a *fresh* install had the same problem for a different
+reason - an empty database and no way to fill it, since the policy pages need
+a login. It silently fell back to `advance_days = 1`, so a day-of category
+would have been scheduled to fire a whole day early:
+
+```
+new install, before:  0 categories | Arrakis notice = 1 day | "Room 46002"
+new install, after:  21 categories | Arrakis notice = 0 days | LIBLWNL-AK-01
+```
+
+The measured catalogue now ships with the code as `booking/catalog_seed.json`
+(21 categories, 116 desk names - public library data, nothing personal) and
+loads itself the first time the catalogue is read. `/refreshcatalog` re-reads
+it from the site and rewrites the seed file so the correction can be
+committed. There is still no *scheduled* refresh - that part remains open,
+but it now matters far less: the seed is right until the library changes.
 
 ## H2. ~~Holds die with the process, and nothing tells the user~~ PARTLY FIXED 3 Sep
 

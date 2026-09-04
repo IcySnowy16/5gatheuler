@@ -1,0 +1,760 @@
+{
+ "categories": {
+  "3368_11822": {
+   "advance_days": 0,
+   "category": "Arrakis - Single Monitor",
+   "gid": 11822,
+   "hours": {
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "46002": "LIBLWNL-AK-01 (Capacity 1)",
+    "46004": "LIBLWNL-AK-02 (Capacity 1)",
+    "46005": "LIBLWNL-AK-03 (Capacity 1)",
+    "46006": "LIBLWNL-AK-16 (Capacity 1)",
+    "46377": "LIBLWNL-AK-04 (Capacity 1)",
+    "46378": "LIBLWNL-AK-05 (Capacity 1)",
+    "46379": "LIBLWNL-AK-06 (Capacity 1)",
+    "46380": "LIBLWNL-AK-07 (Capacity 1)",
+    "46381": "LIBLWNL-AK-08 (Capacity 1)",
+    "46382": "LIBLWNL-AK-09 (Capacity 1)",
+    "46383": "LIBLWNL-AK-10 (Capacity 1)",
+    "46384": "LIBLWNL-AK-11 (Capacity 1)",
+    "46385": "LIBLWNL-AK-12 (Capacity 1)",
+    "46386": "LIBLWNL-AK-13 (Capacity 1)",
+    "46387": "LIBLWNL-AK-14 (Capacity 1)",
+    "46388": "LIBLWNL-AK-15 (Capacity 1)",
+    "46389": "LIBLWNL-AK-17 (Capacity 1)",
+    "46390": "LIBLWNL-AK-18 (Capacity 1)",
+    "46391": "LIBLWNL-AK-19 (Capacity 1)",
+    "46392": "LIBLWNL-AK-20 (Capacity 1)"
+   }
+  },
+  "3368_11823": {
+   "advance_days": 0,
+   "category": "Arrakis - Dual Monitors PC",
+   "gid": 11823,
+   "hours": {
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "46942": "LIBLWNL-AK-21 (Capacity 1)",
+    "46943": "LIBLWNL-AK-22 (Capacity 1)",
+    "46944": "LIBLWNL-AK-23 (Capacity 1)",
+    "46945": "LIBLWNL-AK-24 (Capacity 1)",
+    "46946": "LIBLWNL-AK-25 (Capacity 1)"
+   }
+  },
+  "3368_11825": {
+   "advance_days": 0,
+   "category": "Single Monitor",
+   "gid": 11825,
+   "hours": {
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "46007": "LWNL M01 (Capacity 1)",
+    "46884": "LWNL M04 (Capacity 1)",
+    "46885": "LWNL M03 (Capacity 1)",
+    "46886": "LWNL M02 (Capacity 1)",
+    "46955": "LWNL M05 (Capacity 1)",
+    "46956": "LWNL M06 (Capacity 1)",
+    "46957": "LWNL M07 (Capacity 1)",
+    "46958": "LWNL M08 (Capacity 1)"
+   }
+  },
+  "3368_11973": {
+   "advance_days": 0,
+   "category": "Curved Monitor",
+   "gid": 11973,
+   "hours": {
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "46825": "LIBLWNL-CM-01 (Capacity 1)",
+    "46826": "LIBLWNL-CM-02 (Capacity 1)",
+    "46827": "LIBLWNL-CM-03 (Capacity 1)",
+    "46828": "LIBLWNL-CM-04 (Capacity 1)"
+   }
+  },
+  "3368_13586": {
+   "advance_days": 1,
+   "category": "Immersion@Stargate",
+   "gid": 13586,
+   "hours": {
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "53667": "VR Room 1 - PC 1 (Capacity 1)",
+    "53668": "VR Room 1 - PC 2 (Capacity 1)"
+   }
+  },
+  "3368_13893": {
+   "advance_days": 0,
+   "category": "Stargate - Single Monitor",
+   "gid": 13893,
+   "hours": {
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "46008": "LIBLWNL-SG-01 (Capacity 1)",
+    "46829": "LIBLWNL-SG-02 (Capacity 1)",
+    "46947": "LIBLWNL-SG-03 (Capacity 1)",
+    "46948": "LIBLWNL-SG-04 (Capacity 1)",
+    "46949": "LIBLWNL-SG-05 (Capacity 1)",
+    "46950": "LIBLWNL-SG-06 (Capacity 1)"
+   }
+  },
+  "3368_5807": {
+   "advance_days": 1,
+   "category": "Circular Pod",
+   "gid": 5807,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 120,
+   "max_each": 120,
+   "spaces": {
+    "22145": "Atwood (Mirroring TV) (Capacity 5)",
+    "22146": "Butler (No mirroring TV) (Capacity 10)",
+    "22147": "Le Guin (Mirroring TV) (Capacity 5)",
+    "22148": "Tiptree (Mirroring TV) (Capacity 5)",
+    "22149": "Wilhelm (Mirroring TV) (Capacity 5)"
+   }
+  },
+  "3368_8416": {
+   "advance_days": 1,
+   "category": "Learning Pod",
+   "gid": 8416,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "31407": "LWNL Pod 1 (LCD TV) (Capacity 6)",
+    "31408": "LWNL Pod 2 (LCD TV) (Capacity 6)",
+    "31409": "LWNL Pod 3 (LCD TV) (Capacity 6)",
+    "31410": "LWNL Pod 4 (Capacity 6)",
+    "31411": "LWNL Pod 5 (Capacity 6)",
+    "31412": "LWNL Pod 6 (Capacity 6)"
+   }
+  },
+  "3368_8421": {
+   "advance_days": 30,
+   "category": "Recording Room",
+   "gid": 8421,
+   "hours": {
+    "0": [
+     "08:30",
+     "21:00"
+    ],
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "3": [
+     "08:30",
+     "21:00"
+    ],
+    "4": [
+     "08:30",
+     "21:00"
+    ],
+    "5": [
+     "08:30",
+     "16:30"
+    ],
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 120,
+   "max_each": 120,
+   "spaces": {
+    "31413": "LWNL Recording Room (Capacity 6)"
+   }
+  },
+  "3368_8442": {
+   "advance_days": 1,
+   "category": "Tardis - Video Conferencing Room",
+   "gid": 8442,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 120,
+   "max_each": 120,
+   "spaces": {
+    "31417": "Tardis (Capacity 2)"
+   }
+  },
+  "3378_11821": {
+   "advance_days": 1,
+   "category": "PC - Bloomberg",
+   "gid": 11821,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Business Library",
+   "lid": 3378,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "45999": "Bloomberg-01 (Capacity 1)",
+    "46001": "Bloomberg-02 (Capacity 1)",
+    "46346": "Bloomberg-03 (Capacity 1)",
+    "46347": "Bloomberg-04 (Capacity 1)"
+   }
+  },
+  "3378_11876": {
+   "advance_days": 0,
+   "category": "PC / Single Monitor",
+   "gid": 11876,
+   "hours": {
+    "6": null
+   },
+   "library": "Business Library",
+   "lid": 3378,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "46359": "LIB-BUSDM01 (Capacity 1)",
+    "46360": "LIB-BUSDM02 (Capacity 1)",
+    "46361": "LIB-BUSDM03 (Capacity 1)",
+    "46362": "LIB-BUSDM04 (Capacity 1)",
+    "46363": "LIB-BUSDM05 (Capacity 1)",
+    "46364": "LIB-BUSDM06 (Capacity 1)",
+    "46365": "LIB-BUSDM07 (Capacity 1)",
+    "46366": "LIB-BUSDM08 (Capacity 1)",
+    "46367": "LIB-BUSDM09 (Capacity 1)",
+    "46368": "LIB-BUSDM10 (Capacity 1)",
+    "46369": "LIB-BUSDM11 (Capacity 1)",
+    "46372": "LIB-BUSDM14 (Capacity 1)",
+    "46373": "LIB-BUSDM15 (Capacity 1)",
+    "46881": "LIB-BUSDM16 (Capacity 1)"
+   }
+  },
+  "3378_8443": {
+   "advance_days": 30,
+   "category": "Cinema Room",
+   "gid": 8443,
+   "hours": {
+    "0": [
+     "08:30",
+     "21:00"
+    ],
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "3": [
+     "08:30",
+     "21:00"
+    ],
+    "4": [
+     "08:30",
+     "21:00"
+    ],
+    "5": [
+     "08:30",
+     "16:30"
+    ],
+    "6": null
+   },
+   "library": "Business Library",
+   "lid": 3378,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "31418": "Business Library Cinema Room (Capacity 20)"
+   }
+  },
+  "3378_8444": {
+   "advance_days": 1,
+   "category": "Discussion Pod",
+   "gid": 8444,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Business Library",
+   "lid": 3378,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "31419": "Pod 1 (Capacity 6)",
+    "31420": "Pod 2 (Capacity 6)",
+    "31421": "Pod 3 (Capacity 6)",
+    "31422": "Pod 4 (Capacity 6)",
+    "31423": "Pod 5 (Capacity 6)",
+    "31424": "Pod 6 (Capacity 6)",
+    "31425": "Pod 7 (Capacity 6)"
+   }
+  },
+  "3378_8445": {
+   "advance_days": 1,
+   "category": "Language Learning Room",
+   "gid": 8445,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Business Library",
+   "lid": 3378,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "31426": "Language Learning Room 1 (Capacity 1)",
+    "31427": "Language Learning Room 2 (Capacity 1)",
+    "31428": "Language Learning Room 3 (Capacity 1)",
+    "31429": "Language Learning Room 4 (Capacity 1)",
+    "31430": "Language Learning Room 5 (Capacity 1)"
+   }
+  },
+  "3378_8446": {
+   "advance_days": 1,
+   "category": "Study Room",
+   "gid": 8446,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Business Library",
+   "lid": 3378,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "31431": "Study Room A (Capacity 1)",
+    "31432": "Study Room B (Capacity 1)",
+    "31433": "Study Room C (Capacity 1)",
+    "31434": "Study Room D (Capacity 1)",
+    "31435": "Study Room E (Capacity 1)",
+    "31436": "Study Room F (Capacity 1)",
+    "31437": "Study Room G (Capacity 1)",
+    "31438": "Study Room H (Capacity 1)",
+    "31439": "Study Room I (Capacity 1)",
+    "31440": "Study Room J (Capacity 1)",
+    "31441": "Study Room K (Capacity 1)",
+    "31442": "Study Room L (Capacity 1)",
+    "31443": "Study Room M (Capacity 1)",
+    "31444": "Study Room N (Capacity 1)"
+   }
+  },
+  "4903_12344": {
+   "advance_days": 1,
+   "category": "Audio-Visual Pods",
+   "gid": 12344,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Art, Design & Media Library",
+   "lid": 4903,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "48454": "Audio-Visual Pod 1 (Capacity 3)",
+    "48514": "Audio-Visual Pod 2 (Capacity 3)",
+    "48515": "Audio-Visual Pod 3 (Capacity 3)"
+   }
+  },
+  "4903_8447": {
+   "advance_days": 30,
+   "category": "AV Room",
+   "gid": 8447,
+   "hours": {
+    "0": [
+     "08:30",
+     "21:00"
+    ],
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "3": [
+     "08:30",
+     "21:00"
+    ],
+    "4": [
+     "08:30",
+     "21:00"
+    ],
+    "5": [
+     "08:30",
+     "16:30"
+    ],
+    "6": null
+   },
+   "library": "Art, Design & Media Library",
+   "lid": 4903,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "31445": "AV Room (Capacity 30)"
+   }
+  },
+  "4904_12159": {
+   "advance_days": 1,
+   "category": "PC - Wind Financial Terminal",
+   "gid": 12159,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Chinese Library",
+   "lid": 4904,
+   "max_day": 480,
+   "max_each": 120,
+   "spaces": {
+    "47832": "Wind Financial Terminal (Capacity 1)"
+   }
+  },
+  "4905_11974": {
+   "advance_days": 0,
+   "category": "Single Monitor",
+   "gid": 11974,
+   "hours": {
+    "6": null
+   },
+   "library": "Communication & Information Library",
+   "lid": 4905,
+   "max_day": 480,
+   "max_each": 60,
+   "spaces": {
+    "46830": "C01 (Capacity 1)",
+    "46831": "C02 (Capacity 1)",
+    "46832": "C03 (Capacity 1)",
+    "46833": "C04 (Capacity 1)",
+    "46875": "C05 (Capacity 1)"
+   }
+  },
+  "4905_12346": {
+   "advance_days": 1,
+   "category": "Discussion Pod",
+   "gid": 12346,
+   "hours": {
+    "2": [
+     "08:30",
+     "21:00"
+    ],
+    "6": null
+   },
+   "library": "Communication & Information Library",
+   "lid": 4905,
+   "max_day": 240,
+   "max_each": 240,
+   "spaces": {
+    "48457": "Pod 1 (Capacity 4)",
+    "48984": "Pod 2 (Capacity 4)",
+    "48985": "Pod 3 (Capacity 4)"
+   }
+  }
+ },
+ "probed_limits": {
+  "3368_11822": {
+   "label": "Arrakis - Single Monitor",
+   "max": 120,
+   "min": 60,
+   "probed_start": "2026-08-25 18:00"
+  },
+  "3368_11823": {
+   "label": "Arrakis - Dual Monitors PC",
+   "max": 120,
+   "min": 60,
+   "probed_start": "2026-08-25 16:30"
+  },
+  "3368_11825": {
+   "label": "Single Monitor",
+   "max": 120,
+   "min": 60,
+   "probed_start": "2026-08-25 13:30"
+  },
+  "3368_11973": {
+   "label": "Curved Monitor",
+   "max": 75,
+   "min": 60,
+   "probed_start": "2026-08-25 12:45"
+  },
+  "3368_13586": {
+   "label": "Immersion@Stargate",
+   "max": 120,
+   "min": 30,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "3368_13893": {
+   "label": "Stargate - Single Monitor",
+   "max": 120,
+   "min": 60,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "3368_5807": {
+   "label": "Circular Pod",
+   "max": 120,
+   "min": 30,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "3368_8416": {
+   "label": "Learning Pod",
+   "max": 240,
+   "min": 60,
+   "probed_start": "2026-08-25 18:00"
+  },
+  "3368_8421": {
+   "label": "Recording Room",
+   "max": 75,
+   "min": 60,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "3368_8442": {
+   "label": "Tardis - Video Conferencing Room",
+   "max": 60,
+   "min": 30,
+   "probed_start": "2026-08-25 18:00"
+  },
+  "3378_11821": {
+   "label": "PC - Bloomberg",
+   "max": 120,
+   "min": 60,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "3378_11876": {
+   "label": "PC / Single Monitor",
+   "max": 120,
+   "min": 60,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "3378_8443": {
+   "label": "Cinema Room",
+   "max": 30,
+   "min": 30,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "3378_8444": {
+   "label": "Discussion Pod",
+   "max": 150,
+   "min": 30,
+   "probed_start": "2026-08-25 18:30"
+  },
+  "3378_8445": {
+   "label": "Language Learning Room",
+   "max": 60,
+   "min": 30,
+   "probed_start": "2026-08-25 14:00"
+  },
+  "3378_8446": {
+   "label": "Study Room",
+   "max": 210,
+   "min": 30,
+   "probed_start": "2026-08-25 17:30"
+  },
+  "4903_12344": {
+   "label": "Audio-Visual Pods",
+   "max": 240,
+   "min": 30,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "4903_8447": {
+   "label": "AV Room",
+   "max": 240,
+   "min": 30,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "4904_12159": {
+   "label": "PC - Wind Financial Terminal",
+   "max": 120,
+   "min": 60,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "4905_11974": {
+   "label": "Single Monitor",
+   "max": 60,
+   "min": 60,
+   "probed_start": "2026-08-25 12:15"
+  },
+  "4905_12346": {
+   "label": "Discussion Pod",
+   "max": 30,
+   "min": 30,
+   "probed_start": "2026-08-25 13:00"
+  }
+ },
+ "room_names": {
+  "22145": "Atwood (Mirroring TV) (Capacity 5)",
+  "22146": "Butler (No mirroring TV) (Capacity 10)",
+  "22147": "Le Guin (Mirroring TV) (Capacity 5)",
+  "22148": "Tiptree (Mirroring TV) (Capacity 5)",
+  "22149": "Wilhelm (Mirroring TV) (Capacity 5)",
+  "31407": "LWNL Pod 1 (LCD TV) (Capacity 6)",
+  "31408": "LWNL Pod 2 (LCD TV) (Capacity 6)",
+  "31409": "LWNL Pod 3 (LCD TV) (Capacity 6)",
+  "31410": "LWNL Pod 4 (Capacity 6)",
+  "31411": "LWNL Pod 5 (Capacity 6)",
+  "31412": "LWNL Pod 6 (Capacity 6)",
+  "31413": "LWNL Recording Room (Capacity 6)",
+  "31417": "Tardis (Capacity 2)",
+  "31418": "Business Library Cinema Room (Capacity 20)",
+  "31419": "Pod 1 (Capacity 6)",
+  "31420": "Pod 2 (Capacity 6)",
+  "31421": "Pod 3 (Capacity 6)",
+  "31422": "Pod 4 (Capacity 6)",
+  "31423": "Pod 5 (Capacity 6)",
+  "31424": "Pod 6 (Capacity 6)",
+  "31425": "Pod 7 (Capacity 6)",
+  "31426": "Language Learning Room 1 (Capacity 1)",
+  "31427": "Language Learning Room 2 (Capacity 1)",
+  "31428": "Language Learning Room 3 (Capacity 1)",
+  "31429": "Language Learning Room 4 (Capacity 1)",
+  "31430": "Language Learning Room 5 (Capacity 1)",
+  "31431": "Study Room A (Capacity 1)",
+  "31432": "Study Room B (Capacity 1)",
+  "31433": "Study Room C (Capacity 1)",
+  "31434": "Study Room D (Capacity 1)",
+  "31435": "Study Room E (Capacity 1)",
+  "31436": "Study Room F (Capacity 1)",
+  "31437": "Study Room G (Capacity 1)",
+  "31438": "Study Room H (Capacity 1)",
+  "31439": "Study Room I (Capacity 1)",
+  "31440": "Study Room J (Capacity 1)",
+  "31441": "Study Room K (Capacity 1)",
+  "31442": "Study Room L (Capacity 1)",
+  "31443": "Study Room M (Capacity 1)",
+  "31444": "Study Room N (Capacity 1)",
+  "31445": "AV Room (Capacity 30)",
+  "45999": "Bloomberg-01 (Capacity 1)",
+  "46001": "Bloomberg-02 (Capacity 1)",
+  "46002": "LIBLWNL-AK-01 (Capacity 1)",
+  "46004": "LIBLWNL-AK-02 (Capacity 1)",
+  "46005": "LIBLWNL-AK-03 (Capacity 1)",
+  "46006": "LIBLWNL-AK-16 (Capacity 1)",
+  "46007": "LWNL M01 (Capacity 1)",
+  "46008": "LIBLWNL-SG-01 (Capacity 1)",
+  "46346": "Bloomberg-03 (Capacity 1)",
+  "46347": "Bloomberg-04 (Capacity 1)",
+  "46359": "LIB-BUSDM01 (Capacity 1)",
+  "46360": "LIB-BUSDM02 (Capacity 1)",
+  "46361": "LIB-BUSDM03 (Capacity 1)",
+  "46362": "LIB-BUSDM04 (Capacity 1)",
+  "46363": "LIB-BUSDM05 (Capacity 1)",
+  "46364": "LIB-BUSDM06 (Capacity 1)",
+  "46365": "LIB-BUSDM07 (Capacity 1)",
+  "46366": "LIB-BUSDM08 (Capacity 1)",
+  "46367": "LIB-BUSDM09 (Capacity 1)",
+  "46368": "LIB-BUSDM10 (Capacity 1)",
+  "46369": "LIB-BUSDM11 (Capacity 1)",
+  "46372": "LIB-BUSDM14 (Capacity 1)",
+  "46373": "LIB-BUSDM15 (Capacity 1)",
+  "46377": "LIBLWNL-AK-04 (Capacity 1)",
+  "46378": "LIBLWNL-AK-05 (Capacity 1)",
+  "46379": "LIBLWNL-AK-06 (Capacity 1)",
+  "46380": "LIBLWNL-AK-07 (Capacity 1)",
+  "46381": "LIBLWNL-AK-08 (Capacity 1)",
+  "46382": "LIBLWNL-AK-09 (Capacity 1)",
+  "46383": "LIBLWNL-AK-10 (Capacity 1)",
+  "46384": "LIBLWNL-AK-11 (Capacity 1)",
+  "46385": "LIBLWNL-AK-12 (Capacity 1)",
+  "46386": "LIBLWNL-AK-13 (Capacity 1)",
+  "46387": "LIBLWNL-AK-14 (Capacity 1)",
+  "46388": "LIBLWNL-AK-15 (Capacity 1)",
+  "46389": "LIBLWNL-AK-17 (Capacity 1)",
+  "46390": "LIBLWNL-AK-18 (Capacity 1)",
+  "46391": "LIBLWNL-AK-19 (Capacity 1)",
+  "46392": "LIBLWNL-AK-20 (Capacity 1)",
+  "46825": "LIBLWNL-CM-01 (Capacity 1)",
+  "46826": "LIBLWNL-CM-02 (Capacity 1)",
+  "46827": "LIBLWNL-CM-03 (Capacity 1)",
+  "46828": "LIBLWNL-CM-04 (Capacity 1)",
+  "46829": "LIBLWNL-SG-02 (Capacity 1)",
+  "46830": "C01 (Capacity 1)",
+  "46831": "C02 (Capacity 1)",
+  "46832": "C03 (Capacity 1)",
+  "46833": "C04 (Capacity 1)",
+  "46875": "C05 (Capacity 1)",
+  "46881": "LIB-BUSDM16 (Capacity 1)",
+  "46884": "LWNL M04 (Capacity 1)",
+  "46885": "LWNL M03 (Capacity 1)",
+  "46886": "LWNL M02 (Capacity 1)",
+  "46942": "LIBLWNL-AK-21 (Capacity 1)",
+  "46943": "LIBLWNL-AK-22 (Capacity 1)",
+  "46944": "LIBLWNL-AK-23 (Capacity 1)",
+  "46945": "LIBLWNL-AK-24 (Capacity 1)",
+  "46946": "LIBLWNL-AK-25 (Capacity 1)",
+  "46947": "LIBLWNL-SG-03 (Capacity 1)",
+  "46948": "LIBLWNL-SG-04 (Capacity 1)",
+  "46949": "LIBLWNL-SG-05 (Capacity 1)",
+  "46950": "LIBLWNL-SG-06 (Capacity 1)",
+  "46955": "LWNL M05 (Capacity 1)",
+  "46956": "LWNL M06 (Capacity 1)",
+  "46957": "LWNL M07 (Capacity 1)",
+  "46958": "LWNL M08 (Capacity 1)",
+  "47832": "Wind Financial Terminal (Capacity 1)",
+  "48454": "Audio-Visual Pod 1 (Capacity 3)",
+  "48457": "Pod 1 (Capacity 4)",
+  "48514": "Audio-Visual Pod 2 (Capacity 3)",
+  "48515": "Audio-Visual Pod 3 (Capacity 3)",
+  "48984": "Pod 2 (Capacity 4)",
+  "48985": "Pod 3 (Capacity 4)",
+  "53667": "VR Room 1 - PC 1 (Capacity 1)",
+  "53668": "VR Room 1 - PC 2 (Capacity 1)"
+ }
+}

@@ -63,6 +63,29 @@ When it prints `Bot is running. Data dir: …` it is live. Message it `/start`
 in Telegram, then `/setup` (private chat) to save your NTU login — it is
 encrypted at rest and never leaves the machine.
 
+### Moving to a second laptop
+
+The code is all you need to copy — clone it, or sync the folder. Nothing from
+the data folder should travel with it, and none of it has to:
+
+| Left behind | What happens |
+|---|---|
+| `.env` | Write a new one (same token, or a second bot from @BotFather). |
+| `schedule_matcher.db` | Rebuilt on first run. Past bookings and favourites stay on the old machine. |
+| NTU login | Re-enter with `/setup`. Windows encrypts it per machine, so a copied database could not decrypt it anyway. |
+| `pw_state_*.json` | The bot signs in again by itself. |
+| `bot.log`, `debug/`, `proof/` | Recreated as needed. |
+
+The library catalogue — hours, notice periods, per-booking caps and all 116
+desk names — **ships with the code** in `booking/catalog_seed.json`, so a new
+install knows that Arrakis is day-of-only before anyone signs in. `/refreshcatalog`
+re-reads it from the site if the library ever changes, and rewrites that file
+so the correction can be committed.
+
+> **One bot, one machine.** Two copies polling the same `TELEGRAM_TOKEN` fight
+> over updates and both misbehave. Stop the old one first, or give the second
+> laptop its own bot token.
+
 ---
 
 ## Using it
