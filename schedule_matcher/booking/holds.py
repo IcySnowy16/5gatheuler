@@ -233,6 +233,14 @@ async def create(user_id: int, username: str, password: str, lid: int, gid: int,
     if len(mine) >= config.MAX_HOLDS:
         raise HoldError(f"You already hold {len(mine)} slots "
                         f"(limit {config.MAX_HOLDS}). Release one first: /holds")
+    # Each hold is a live headless browser (~270 MB). Refusing here is far
+    # better than launching one on a machine with no room and having Windows
+    # kill the bot - which would drop every other hold with it.
+    free = config.free_ram_mb()
+    if free is not None and free < config.MIN_FREE_RAM_MB:
+        raise HoldError(
+            f"This machine only has {free} MB of memory free, and a hold needs "
+            f"about 270 MB. Close something, or release a hold: /holds")
     pw = await _driver()
     browser = await pw.chromium.launch(headless=not config.HEADFUL)
     state = _state_path(user_id)

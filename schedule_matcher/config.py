@@ -17,6 +17,7 @@ in cloud storage.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -111,6 +112,12 @@ LOG_FILE = HOME / "bot.log"
 # browser parked on the checkout page, so keep the cap modest. The site's own
 # hold lasts ~10 min; the bot renews it until HOLD_MAX_MINUTES is reached.
 MAX_HOLDS = int(os.getenv("MAX_HOLDS", "6"))
+# Refuse a new hold when the machine is nearly out of memory. A headless
+# Chromium needs ~270 MB; below this there is no room for one.
+MIN_FREE_RAM_MB = int(os.getenv("MIN_FREE_RAM_MB", "500"))
+# Debug dumps are unbounded otherwise - a screenshot plus HTML per
+# failure, on a tablet with little disk to spare.
+MAX_DEBUG_FILES = int(os.getenv("MAX_DEBUG_FILES", "40"))
 # How long the bot keeps re-taking a slot before it stops on its own.
 # This is the bot being polite, not a library rule - set it to 0 for no
 # limit, or extend a single hold from /holds when you need longer.
@@ -148,6 +155,55 @@ def warnings() -> list[str]:
             f"NTU credentials. Move it to {HOME} or set DB_PATH."
         )
     return notes
+
+
+def free_ram_mb() -> int | None:
+    """Physical memory available right now, or None if we cannot tell.
+
+    Each hold parks a headless Chromium, measured at ~220 MB for the first
+    and ~270 MB for each after it. On a 4 GB tablet that is the difference
+    between a bot that works and one that swaps until Windows kills it, so
+    the hold code asks before launching another.
+    """
+    if sys.platform == "win32":
+        import ctypes
+
+        class _Status(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        try:
+            st = _Status()
+            st.dwLength = ctypes.sizeof(_Status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+                return int(st.ullAvailPhys // (1024 * 1024))
+        except Exception:
+            return None
+        return None
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) // 1024
+    except Exception:
+        return None
+    return None
+
+
+def trim_debug_dir() -> None:
+    """Keep only the newest MAX_DEBUG_FILES diagnostics."""
+    try:
+        files = sorted(DEBUG_DIR.glob("*"), key=lambda f: f.stat().st_mtime)
+        for old in files[:-MAX_DEBUG_FILES]:
+            old.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def validate() -> None:

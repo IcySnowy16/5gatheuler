@@ -102,6 +102,7 @@ def _dump(page, tag: str) -> list[str]:
         files.append(str(html))
     except Exception:
         log.exception("debug dump failed")
+    config.trim_debug_dir()          # keep the newest few, not every failure
     return files
 
 

@@ -26,7 +26,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1        # Linux/macOS: source .venv/bin/activate
 
 pip install -r requirements.txt
-python -m playwright install chromium   # ~400 MB, needed to book
+python -m playwright install chromium   # ~700 MB on disk, needed to book
 ```
 
 On Linux add the browser's system libraries:
@@ -85,6 +85,50 @@ so the correction can be committed.
 > **One bot, one machine.** Two copies polling the same `TELEGRAM_TOKEN` fight
 > over updates and both misbehave. Stop the old one first, or give the second
 > laptop its own bot token.
+
+### Running it on a small or older laptop
+
+Measured, not estimated (Core Ultra 7; a 7th-gen dual-core is roughly 2–3×
+slower on the CPU-bound parts):
+
+| | Cost |
+|---|---|
+| Bot idle, no browser | **47 MB** RAM, ~0% CPU |
+| Each live hold | **~270 MB** RAM (a headless Chromium, 4 processes) |
+| Booking at a window opening | ~3 s from cold to ready-to-book |
+| Data folder | 5 MB, plus a capped `debug/` |
+| Chromium, one-off | ~700 MB on disk |
+
+Idle it is nothing; the browsers are the whole cost. On **4 GB** set
+`MAX_HOLDS=2`, on **8 GB** `MAX_HOLDS=4`. The bot now refuses a hold when the
+machine has less than `MIN_FREE_RAM_MB` (500) free, rather than launching one
+and risking Windows killing the process — which would drop every other hold
+with it.
+
+**Sleep is the real problem, not speed.** A booking window opens at 23:59:00,
+and a sleeping laptop misses it entirely — the process is suspended, so
+nothing fires and nothing is logged. On a tablet or laptop that runs it:
+
+```powershell
+powercfg /change standby-timeout-ac 0     # never sleep on mains
+powercfg /change hibernate-timeout-ac 0
+powercfg /change monitor-timeout-ac 10    # screen off is fine
+```
+
+Keep it plugged in for a 23:59 booking, and if it has a detachable keyboard,
+set "closing the lid" to do nothing. Battery power will still sleep it.
+
+**Restart it after a reboot.** Windows Update will restart the machine
+eventually; nothing brings the bot back by itself. Register it once with Task
+Scheduler:
+
+```powershell
+$py  = "C:\path\to\5gatheuler\.venv\Scripts\pythonw.exe"
+$app = "C:\path\to\5gatheuler\Schedule Matcher.py"
+schtasks /create /tn "ScheduleMatcher" /tr "`"$py`" `"$app`"" /sc onlogon /rl highest
+```
+
+It re-takes its holds on startup, so a restart costs a gap, not the slots.
 
 ---
 
