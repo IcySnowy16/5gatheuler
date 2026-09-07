@@ -167,6 +167,10 @@ Send `/menu` — everything is buttons; nothing has to be typed.
 **Schedule Matcher**
 - `/create` names the event and asks which days it covers, then posts one
   message in the group with a **Paint my availability** link.
+- **`/create` works from a private chat too.** Telegram's own group picker
+  offers the groups the bot is already in; the event is created there and the
+  message appears in the group, not in your DM. *Just for me* keeps it
+  private instead.
 - That link opens a **grid you drag across**, one day per screen, with
   everyone else's answers shaded underneath yours. It runs inside Telegram as
   a Mini App; sending replaces your previous answer.

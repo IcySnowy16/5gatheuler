@@ -344,12 +344,79 @@ def _paint_markup(bot, chat_id: int, code: str):
         "Paint my availability", url=_deep_link(bot, chat_id, code))]])
 
 
-async def _post_board(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                      chat_id: int, code: str) -> None:
-    msg = await update.effective_message.reply_text(
-        _board_text(chat_id, code),
+async def _post_board(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
+                      code: str) -> None:
+    """Put the event's one message in the chat the event belongs to.
+
+    Sent rather than replied to, because the organiser may be setting this up
+    from a private chat while the event lives in a group.
+    """
+    msg = await context.bot.send_message(
+        chat_id, _board_text(chat_id, code),
         reply_markup=_paint_markup(context.bot, chat_id, code))
     storage.set_event_board(chat_id, code, msg.chat_id, msg.message_id)
+
+
+async def _ask_which_chat(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                          name: str) -> None:
+    """Telegram's own group picker, limited to groups the bot is already in."""
+    from telegram import (KeyboardButton, KeyboardButtonRequestChat,
+                          ReplyKeyboardMarkup)
+
+    context.user_data["pending_event"] = name
+    await update.effective_message.reply_text(
+        f"'{name}' - which chat is it for?\n\n"
+        "Pick the group and I will post it there, so everyone can paint their "
+        "availability. Only groups I am already in will be offered.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton(
+                "Choose the group",
+                request_chat=KeyboardButtonRequestChat(
+                    request_id=1, chat_is_channel=False, bot_is_member=True,
+                    request_title=True))],
+             [KeyboardButton("Just for me")]],
+            resize_keyboard=True, one_time_keyboard=True))
+
+
+async def on_chat_shared(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The group came back from Telegram's picker: create the event there."""
+    shared = update.effective_message.chat_shared
+    name = context.user_data.pop("pending_event", None)
+    if not name:
+        await update.effective_message.reply_text(
+            "I have lost track of which event that was for - /create starts "
+            "again.", reply_markup=persistent_keyboard())
+        return
+    target = shared.chat_id
+    title = getattr(shared, "title", None) or "that group"
+    code = _new_code()
+    try:
+        storage.create_event(target, code, name, update.effective_user.id)
+    except Exception:
+        log.exception("could not create %s in %s", name, target)
+        await update.effective_message.reply_text(
+            "I could not create it there. Am I still in that group?",
+            reply_markup=persistent_keyboard())
+        return
+    context.user_data["event_chat_title"] = title
+    await _ask_dates(update, context, target, code, name, where=f" in {title}")
+
+
+async def on_just_for_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The other answer to "which chat": an event nobody else can see."""
+    name = context.user_data.pop("pending_event", None)
+    if not name:
+        return
+    code = _new_code()
+    storage.create_event(update.effective_chat.id, code, name,
+                         update.effective_user.id)
+    await update.effective_message.reply_text(
+        "Right - this one is just yours.", reply_markup=persistent_keyboard())
+    await _ask_dates(update, context, update.effective_chat.id, code, name)
+
+
+def _new_code() -> str:
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 
 # --- Which days is the event about ----------------------------------------
@@ -359,17 +426,46 @@ DATE_PRESETS = (("The next 7 days", "7"), ("The next 14 days", "14"),
 
 
 async def _ask_dates(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                     code: str, name: str) -> None:
+                     chat_id: int, code: str, name: str, where: str = "") -> None:
+    """Which days does this event cover?
+
+    The target chat rides in the callback data: this question is often asked
+    in a private chat about an event that belongs to a group, so the chat the
+    buttons are tapped in is not the chat that matters.
+    """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-    rows = [[InlineKeyboardButton(label, callback_data=f"evd|{code}|{key}")]
+    rows = [[InlineKeyboardButton(label, callback_data=f"evd|{chat_id}|{code}|{key}")]
             for label, key in DATE_PRESETS]
     rows.append([InlineKeyboardButton("Pick the dates on a calendar",
-                                      callback_data=f"evd|{code}|cal")])
+                                      callback_data=f"evd|{chat_id}|{code}|cal")])
     await update.effective_message.reply_text(
-        f"'{name}' created, code {code}.\n\nWhich days is it about? Everyone "
-        "paints their availability across these days.",
+        f"'{name}' created{where}, code {code}.\n\nWhich days is it about? "
+        "Everyone paints their availability across these days.",
         reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def _finish_dates(query, context: ContextTypes.DEFAULT_TYPE, chat_id: int,
+                        code: str, name: str, start: date, end: date,
+                        trimmed: bool = False) -> None:
+    """Record the range, post the event where it belongs, say so."""
+    note = (f"\n(Trimmed to {webapp.MAX_DAYS} days - that is as many as the "
+            "grid paints at once.)" if trimmed else "")
+    try:
+        await _post_board(context, chat_id, code)
+    except Exception:
+        log.exception("could not post the board for %s in %s", code, chat_id)
+        await query.edit_message_text(
+            f"'{name}' covers {start:%a %d %b} to {end:%a %d %b}, but I could "
+            "not post it in that chat. Am I still there, and allowed to send "
+            "messages?")
+        return
+    where = ""
+    if query.message and chat_id != query.message.chat_id:
+        title = context.user_data.get("event_chat_title", "the group")
+        where = f"\n\nPosted in {title} - everyone there can answer it now."
+    await query.edit_message_text(
+        f"'{name}' covers {start:%a %d %b} to {end:%a %d %b}.{note}{where}")
 
 
 def _preset_range(key: str) -> tuple[date, date]:
@@ -505,6 +601,12 @@ async def on_run_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start an event. Tapped from a menu there are no arguments, so ask."""
+    if context.args and update.effective_chat.type == "private":
+        # An event is owned by a chat, and a private chat is only ever the
+        # organiser's own. Ask which group this one is for, using Telegram's
+        # own picker so nobody has to know a chat id.
+        await _ask_which_chat(update, context, " ".join(context.args))
+        return
     if not context.args:
         await ask.ask(update, context, "event_name",
                       "What should the event be called?",
@@ -525,7 +627,7 @@ async def _create_event(update: Update, context: ContextTypes.DEFAULT_TYPE,
     code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
     storage.create_event(update.effective_chat.id, code, name, update.effective_user.id)
     if config.WEBAPP_URL:
-        await _ask_dates(update, context, code, name)
+        await _ask_dates(update, context, update.effective_chat.id, code, name)
         return
     await update.effective_message.reply_text(
         f"Event '{name}' created!\nCode: {code}\nEveryone: use /add to enter availability.")
@@ -732,26 +834,60 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if action == "evd":
-        code, key = parts[1], parts[2]
-        event = storage.get_event(chat_id, code)
+        target, code, key = int(parts[1]), parts[2], parts[3]
+        event = storage.get_event(target, code)
         if not event:
             await query.edit_message_text("That event no longer exists.")
             return
         if key == "cal":
             # Reuse the month calendar: the first tap is the first day, the
-            # second the last. A flag on chat_data tells the date| branch that
-            # this calendar is choosing a range, not a day to add times to.
-            context.chat_data["range_pick"] = {"code": code, "first": None}
+            # second the last. A note on chat_data tells the date| branch that
+            # this calendar is choosing a range, not a day to add times to -
+            # and which chat's event it belongs to, which may not be this one.
+            context.chat_data["range_pick"] = {"code": code, "chat": target,
+                                               "first": None}
             now = datetime.now()
             await query.edit_message_text(
                 f"'{event['name']}' - tap the FIRST day it covers:",
                 reply_markup=keyboards.month_calendar(now.year, now.month, code))
             return
         start, end = _preset_range(key)
-        storage.set_event_dates(chat_id, code, start, end)
-        await query.edit_message_text(
-            f"'{event['name']}' covers {start:%a %d %b} to {end:%a %d %b}.")
-        await _post_board(update, context, chat_id, code)
+        storage.set_event_dates(target, code, start, end)
+        await _finish_dates(query, context, target, code, event["name"], start, end)
+        return
+
+    # A range being picked has to be recognised before the guard below, which
+    # looks the event up in the chat the buttons are in - wrong when a group's
+    # event is being set up from a private chat.
+    picking = context.chat_data.get("range_pick")
+    if picking and action in ("date", "nav") and parts[-1] == picking.get("code"):
+        target, code = picking["chat"], picking["code"]
+        event = storage.get_event(target, code)
+        if not event:
+            context.chat_data.pop("range_pick", None)
+            await query.edit_message_text("That event no longer exists.")
+            return
+        if action == "nav":
+            await query.edit_message_text(
+                query.message.text or "Pick a day:",
+                reply_markup=keyboards.month_calendar(int(parts[1]), int(parts[2]), code))
+            return
+        chosen = date(int(parts[1]), int(parts[2]), int(parts[3]))
+        if picking["first"] is None:
+            picking["first"] = chosen.isoformat()
+            await query.edit_message_text(
+                f"First day {chosen:%a %d %b}. Now tap the LAST day:",
+                reply_markup=keyboards.month_calendar(chosen.year, chosen.month, code))
+            return
+        context.chat_data.pop("range_pick", None)
+        first = date.fromisoformat(picking["first"])
+        start, end = min(first, chosen), max(first, chosen)
+        span = (end - start).days + 1
+        if span > webapp.MAX_DAYS:
+            end = start + timedelta(days=webapp.MAX_DAYS - 1)
+        storage.set_event_dates(target, code, start, end)
+        await _finish_dates(query, context, target, code, event["name"], start, end,
+                            trimmed=span > webapp.MAX_DAYS)
         return
 
     if action == "best":
@@ -829,28 +965,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "date":
         year, month, day, code = int(parts[1]), int(parts[2]), int(parts[3]), parts[4]
-        picking = context.chat_data.get("range_pick")
-        if picking and picking.get("code") == code:
-            chosen = date(year, month, day)
-            if picking["first"] is None:
-                picking["first"] = chosen.isoformat()
-                await query.edit_message_text(
-                    f"First day {chosen:%a %d %b}. Now tap the LAST day:",
-                    reply_markup=keyboards.month_calendar(year, month, code))
-                return
-            first = date.fromisoformat(picking["first"])
-            context.chat_data.pop("range_pick", None)
-            start, end = min(first, chosen), max(first, chosen)
-            span = (end - start).days + 1
-            if span > webapp.MAX_DAYS:
-                end = start + timedelta(days=webapp.MAX_DAYS - 1)
-            storage.set_event_dates(chat_id, code, start, end)
-            note = (f"\n(Trimmed to {webapp.MAX_DAYS} days - that is as many "
-                    "as the grid paints at once.)" if span > webapp.MAX_DAYS else "")
-            await query.edit_message_text(
-                f"'{event['name']}' covers {start:%a %d %b} to {end:%a %d %b}.{note}")
-            await _post_board(update, context, chat_id, code)
-            return
         await query.edit_message_text(
             f"Start time on {year}-{month:02d}-{day:02d}:{_slots_summary(chat_id, code, user_id)}",
             reply_markup=keyboards.start_time_picker(year, month, day, code))
@@ -1071,6 +1185,11 @@ def main() -> None:
         & filters.Text(list(KEYBOARD_LABELS)), on_keyboard_label), group=-1)
     application.add_handler(MessageHandler(
         filters.StatusUpdate.WEB_APP_DATA, on_web_app_data))
+    application.add_handler(MessageHandler(
+        filters.StatusUpdate.CHAT_SHARED, on_chat_shared))
+    application.add_handler(MessageHandler(
+        filters.TEXT & filters.ChatType.PRIVATE & filters.Text(["Just for me"]),
+        on_just_for_me), group=-1)
     application.add_handler(CallbackQueryHandler(on_callback))
 
     application.add_error_handler(on_error)
