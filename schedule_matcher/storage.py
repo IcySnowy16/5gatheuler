@@ -191,6 +191,10 @@ _MIGRATIONS = (
     "ALTER TABLE bookings ADD COLUMN proof_msg_id INTEGER",
     "ALTER TABLE scheduled_bookings ADD COLUMN hold_id INTEGER",
     "ALTER TABLE scheduled_bookings ADD COLUMN rule_id INTEGER",
+    "ALTER TABLE events ADD COLUMN start_date TEXT",
+    "ALTER TABLE events ADD COLUMN end_date TEXT",
+    "ALTER TABLE events ADD COLUMN board_chat_id INTEGER",
+    "ALTER TABLE events ADD COLUMN board_msg_id INTEGER",
 )
 
 FMT = "%Y-%m-%d %H:%M"
@@ -341,6 +345,74 @@ def delete_slot(chat_id: int, code: str, user_id: int, start: datetime) -> None:
         "DELETE FROM slots WHERE chat_id=? AND code=? AND user_id=? AND start_ts=?",
         (chat_id, code, user_id, start.strftime(FMT)),
     )
+    c.commit()
+
+
+def replace_slots(chat_id: int, code: str, user_id: int, display_name: str,
+                  intervals: list[tuple[datetime, datetime]]) -> int:
+    """Make these intervals be this person's entire availability.
+
+    The tap-through pickers add one slot at a time, so `add_slot` is all they
+    ever needed. A painted grid submits a whole answer instead: what is not
+    painted has been *unpainted*, and only replacing the lot expresses that.
+
+    Rows imported from the old pickle have `user_id IS NULL` and belong to
+    nobody in particular, so they are deliberately left alone rather than
+    being attributed to whoever paints next.
+    """
+    c = conn()
+    with c:                                   # one transaction: never a gap
+        c.execute("DELETE FROM slots WHERE chat_id=? AND code=? AND user_id=?",
+                  (chat_id, code, user_id))
+        c.executemany(
+            "INSERT OR IGNORE INTO slots (chat_id, code, user_id, display_name,"
+            " start_ts, end_ts) VALUES (?,?,?,?,?,?)",
+            [(chat_id, code, user_id, display_name,
+              s.strftime(FMT), e.strftime(FMT)) for s, e in intervals])
+    return len(intervals)
+
+
+def event_days(event, limit: int = 14) -> list[date]:
+    """The days an event covers.
+
+    An event created before the organiser was asked for dates has none, so it
+    falls back to the days people have actually offered, and then to today -
+    the grid has to have something to draw.
+    """
+    start = end = None
+    try:
+        if event["start_date"]:
+            start = date.fromisoformat(event["start_date"])
+        if event["end_date"]:
+            end = date.fromisoformat(event["end_date"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        start = end = None
+    if start and end and end >= start:
+        span = (end - start).days + 1
+        return [start + timedelta(days=n) for n in range(min(span, limit))]
+    used = sorted({s.date() for slots in
+                   availabilities(event["chat_id"], event["code"]).values()
+                   for s, _ in slots})
+    if used:
+        return used[:limit]
+    today = date.today()
+    return [today + timedelta(days=n) for n in range(7)]
+
+
+def set_event_dates(chat_id: int, code: str, start: date, end: date) -> None:
+    c = conn()
+    c.execute("UPDATE events SET start_date=?, end_date=? WHERE chat_id=? AND code=?",
+              (start.isoformat(), end.isoformat(), chat_id, code))
+    c.commit()
+
+
+def set_event_board(chat_id: int, code: str, board_chat_id: int,
+                    board_msg_id: int) -> None:
+    """Remember the one group message that gets edited as people answer, so
+    nobody's reply ever posts a new message into the group."""
+    c = conn()
+    c.execute("UPDATE events SET board_chat_id=?, board_msg_id=? WHERE chat_id=?"
+              " AND code=?", (board_chat_id, board_msg_id, chat_id, code))
     c.commit()
 
 

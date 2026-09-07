@@ -80,6 +80,13 @@ class User:
 
 
 class Bot:
+    username = "TestBot"          # the grid's deep links are built from it
+
+    async def get_chat_member(self, *a, **k):
+        class Member:
+            status = "member"
+        return Member()
+
     async def send_message(self, *a, **k):
         return Msg()
 
@@ -166,6 +173,8 @@ async def main():
         "botemail": (bh.cmd_botemail, []),
         "availability": (bh.cmd_availability, []),
         "groupbook (group)": (groupbook.cmd_groupbook, []),
+        "add (group)": (B.cmd_add, []),
+        "start with a deep link": (B.cmd_start, ["add_n100_ABC123"]),
         "groupcancel (group)": (groupbook.cmd_groupcancel, []),
     }
     for name, (fn, args) in commands.items():
@@ -182,7 +191,8 @@ async def main():
         f"bk|favadd|{BOOKING}", f"bk|fav|{FAV}", f"bk|favdel|{FAV}",
         "bk|fadd", "bk|mu|5", "bk|ht|ask", "bk|ht|120", "bk|hallback",
         f"bk|hagain|{HOLDROW}", "bk|hbook|999", "bk|hrel|999", "bk|hext|999",
-        f"bk|scancel|{JOB}", f"bk|rpause|{RULE}", f"bk|rdel|{RULE}",
+        "evd|ABC123|7", "evd|ABC123|14", "evd|ABC123|mon", "evd|ABC123|cal",
+        "evd|NOPE|7", f"bk|scancel|{JOB}", f"bk|rpause|{RULE}", f"bk|rdel|{RULE}",
         "bk|rpause|99999", f"bk|setcode|{BOOKING}", "bk|back", "bk|home",
         "bk|abort", "view|ABC123", "best|ABC123", "bestdur|ABC123|60",
         "evt|ABC123", "del_evt|ABC123", "ignore", "ask|default",

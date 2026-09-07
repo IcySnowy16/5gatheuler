@@ -165,12 +165,48 @@ Send `/menu` — everything is buttons; nothing has to be typed.
 - `/fav`, `/bookings`, `/scheduled`, `/availability`, `/rules`, `/mostused`.
 
 **Schedule Matcher**
-- `/create` → `/add` → `/view` (emoji grid, or a PNG; pick a subset of people)
-  → `/best`. `/edit` and `/delete` change your own times.
+- `/create` names the event and asks which days it covers, then posts one
+  message in the group with a **Paint my availability** link.
+- That link opens a **grid you drag across**, one day per screen, with
+  everyone else's answers shaded underneath yours. It runs inside Telegram as
+  a Mini App; sending replaces your previous answer.
+- The group is never spammed: the original message is *edited* to list who has
+  answered, however many people reply.
+- `/view` (emoji grid, or a PNG; pick a subset of people) → `/best`.
+  `/edit` and `/delete` still tap through a calendar, for old clients.
 
 **Developer only** (`OWNER_ID`, or someone added with `/dev add <id>`)
 - `/chope` holds a space without booking it, `/holds` manages them,
   `/holdtime` sets how long, `/developer` shows diagnostics and recent errors.
+
+---
+
+## The availability grid (Mini App)
+
+Telegram cannot draw a paintable grid in a chat: an inline keyboard is
+discrete buttons, capped at 8 per row and 100 in total, and a week of
+half-hours is 224 cells. So the grid is a small web page opened inside
+Telegram, served straight from this repo.
+
+**Turn it on once:** repo Settings → Pages → Source *Deploy from a branch* →
+`main` / `/docs`. That publishes `docs/index.html` at
+`https://<user>.github.io/5gatheuler`, which is what `WEBAPP_URL` points at.
+Until it is on, set `WEBAPP_URL=` (empty) and the bot uses the old calendar.
+
+Nothing is hosted by us and no server is added. Everything the page needs
+arrives in the URL - the days, your current answer, and everyone else's as a
+4-bit-per-cell heatmap - and its reply comes back through Telegram's own
+`sendData`, which is why painting happens in a private chat: Telegram only
+allows a Mini App to answer from one. The group link carries the group's id,
+and the bot checks with `getChatMember` that the sender really is a member
+before writing anything.
+
+`docs/index.html` opens in an ordinary browser too, with query parameters
+faked, which is how it is developed:
+
+```
+docs/index.html?c=-100&e=ABC123&n=Test&d0=2026-09-14&nd=7&tot=0
+```
 
 ---
 

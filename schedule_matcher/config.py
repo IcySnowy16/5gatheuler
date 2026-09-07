@@ -115,6 +115,12 @@ OWNER_ID = _owner_id()
 
 LOG_FILE = HOME / "bot.log"
 
+# The availability grid is a Telegram Mini App: a static page that has to be
+# served over HTTPS from somewhere Telegram can reach. GitHub Pages serves it
+# from the repo's own docs/ folder for free. Empty means "not published yet",
+# and the bot falls back to the tap-through calendar.
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://icysnowy16.github.io/5gatheuler").strip()
+
 # Choping (holding a space without booking it). Each hold keeps a headless
 # browser parked on the checkout page, so keep the cap modest. The site's own
 # hold lasts ~10 min; the bot renews it until HOLD_MAX_MINUTES is reached.

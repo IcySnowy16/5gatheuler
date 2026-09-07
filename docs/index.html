@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Availability</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #111111; --hint: #7d7d7d; --line: #e4e4e4;
+    --accent: #2f9e44; --card: #f6f6f6;
+    /* Same five steps as the PNG the bot already sends, so the app and the
+       picture look like one product. */
+    --h0: #f0f0f0; --h1: #ffd6d6; --h2: #ffe9c7; --h3: #e6f4b8; --h4: #7ac943;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 0 12px 96px;
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  header { position: sticky; top: 0; background: var(--bg); padding: 10px 0 6px; z-index: 5; }
+  .event { font-size: 13px; color: var(--hint); }
+  .day { font-size: 20px; font-weight: 600; margin: 2px 0 8px; }
+  .dots { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .dot {
+    width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--card); color: var(--hint); font-size: 11px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dot.done { border-color: var(--accent); color: var(--accent); }
+
+  .grid {
+    display: grid; grid-template-columns: 42px 1fr 42px 1fr; gap: 2px;
+    touch-action: none;            /* dragging paints, it does not scroll */
+    user-select: none;
+  }
+  .lab { font-size: 11px; color: var(--hint); text-align: right; padding-right: 4px;
+         align-self: center; }
+  .cell {
+    height: 32px; border-radius: 5px; border: 1px solid var(--line);
+    background: var(--h0); position: relative;
+  }
+  .cell[data-h="1"] { background: var(--h1); }
+  .cell[data-h="2"] { background: var(--h2); }
+  .cell[data-h="3"] { background: var(--h3); }
+  .cell[data-h="4"] { background: var(--h4); }
+  .cell.mine { background: var(--accent); border-color: var(--accent); }
+  .cell.mine::after {
+    content: ""; position: absolute; inset: 0; border-radius: 4px;
+    border: 2px solid rgba(255,255,255,.55);
+  }
+  .hour { border-top: 1px solid var(--line); }
+
+  .foot { display: flex; gap: 8px; margin-top: 14px; }
+  button {
+    flex: 1; padding: 11px 8px; font-size: 14px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .4; }
+  .legend { margin-top: 12px; font-size: 12px; color: var(--hint);
+            display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line);
+        display: inline-block; }
+  .note { margin-top: 10px; font-size: 12px; color: var(--hint); }
+  .warn { background: #fff3cd; color: #664d03; padding: 8px 10px; border-radius: 8px;
+          font-size: 12px; margin: 8px 0; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="event" id="event"></div>
+  <div class="day" id="dayLabel"></div>
+  <div class="dots" id="dots"></div>
+</header>
+
+<div id="standalone" class="warn" hidden>
+  Opened outside Telegram, so nothing can be sent back. Painting still works —
+  this is the developer view.
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="foot">
+  <button id="prev">‹ Previous</button>
+  <button id="copy">Copy previous day</button>
+  <button id="next" class="primary">Next day ›</button>
+</div>
+
+<div class="legend">
+  <span class="sw" style="background:var(--h0)"></span> nobody
+  <span class="sw" style="background:var(--h2)"></span> some
+  <span class="sw" style="background:var(--h4)"></span> everyone
+  <span class="sw" style="background:var(--accent)"></span> you
+  <span id="tot"></span>
+</div>
+<div class="note">Drag down the strip to paint the times you are free. Drag
+  across times you already picked to erase them.</div>
+<pre id="debug" hidden></pre>
+
+<script>
+"use strict";
+// The grid is 30-minute rows from 08:00, matching the bot's own picture, and
+// a day is drawn as two columns so a whole day fits a phone without
+// scrolling - scrolling and painting cannot share a finger.
+const ROWS = 32, START_HOUR = 8, HALF = 16;
+
+// telegram-web-app.js defines WebApp even in an ordinary browser, so the
+// presence of the object proves nothing. Real initData is a signed string and
+// is only ever handed over inside Telegram.
+const _wa = window.Telegram && window.Telegram.WebApp;
+const tg = (_wa && (_wa.initData || (_wa.initDataUnsafe && _wa.initDataUnsafe.user)))
+  ? _wa : null;
+const q = new URLSearchParams(location.search);
+
+const state = {
+  chat: q.get("c") || "0",
+  code: q.get("e") || "",
+  name: q.get("n") || "Availability",
+  first: q.get("d0") || new Date().toISOString().slice(0, 10),
+  days: Math.max(1, Math.min(14, parseInt(q.get("nd") || "7", 10))),
+  total: parseInt(q.get("tot") || "0", 10),
+  day: 0,
+  mine: null,
+  heat: null,
+};
+
+// --- the same bitmask the bot packs, in reverse -------------------------
+function fromB64(text) {
+  if (!text) return new Uint8Array(0);
+  const pad = "=".repeat((4 - (text.length % 4)) % 4);
+  const bin = atob(text.replace(/-/g, "+").replace(/_/g, "/") + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function toB64(bytes) {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+const cells = () => state.days * ROWS;
+function getBit(bits, i) { return !!(bits[i >> 3] & (1 << (i & 7))); }
+function setBit(bits, i, on) {
+  if (on) bits[i >> 3] |= 1 << (i & 7);
+  else bits[i >> 3] &= ~(1 << (i & 7));
+}
+function heatAt(i) {
+  if (!state.heat || (i >> 1) >= state.heat.length) return 0;
+  const byte = state.heat[i >> 1];
+  return (i % 2 === 0) ? (byte >> 4) : (byte & 15);
+}
+function shade(n) {
+  if (!n || !state.total) return 0;
+  if (n >= state.total) return 4;
+  const r = n / state.total;
+  return r < 1 / 3 ? 1 : r < 2 / 3 ? 2 : 3;
+}
+
+state.mine = (() => {
+  const raw = fromB64(q.get("me") || "");
+  const bits = new Uint8Array(Math.ceil(cells() / 8));
+  bits.set(raw.subarray(0, bits.length));
+  return bits;
+})();
+state.heat = fromB64(q.get("heat") || "");
+
+function dayDate(i) {
+  const d = new Date(state.first + "T00:00:00");
+  d.setDate(d.getDate() + i);
+  return d;
+}
+function label(row) {
+  const h = START_HOUR + Math.floor(row / 2);
+  return String(h).padStart(2, "0") + (row % 2 ? ":30" : ":00");
+}
+function dayHasAny(i) {
+  for (let r = 0; r < ROWS; r++) if (getBit(state.mine, i * ROWS + r)) return true;
+  return false;
+}
+
+// --- drawing -------------------------------------------------------------
+const grid = document.getElementById("grid");
+function build() {
+  grid.innerHTML = "";
+  for (let r = 0; r < HALF; r++) {
+    for (const half of [0, 1]) {
+      const row = r + half * HALF;
+      const lab = document.createElement("div");
+      lab.className = "lab";
+      lab.textContent = row % 2 === 0 ? label(row) : "";
+      grid.appendChild(lab);
+      const cell = document.createElement("div");
+      cell.className = "cell" + (row % 2 === 0 ? " hour" : "");
+      cell.dataset.row = row;
+      grid.appendChild(cell);
+    }
+  }
+  paint();
+}
+function paint() {
+  const base = state.day * ROWS;
+  for (const cell of grid.querySelectorAll(".cell")) {
+    const i = base + Number(cell.dataset.row);
+    cell.classList.toggle("mine", getBit(state.mine, i));
+    cell.dataset.h = shade(heatAt(i));
+  }
+  document.getElementById("dayLabel").textContent =
+    dayDate(state.day).toLocaleDateString(undefined,
+      { weekday: "long", day: "numeric", month: "short" });
+  document.getElementById("prev").disabled = state.day === 0;
+  document.getElementById("copy").disabled = state.day === 0;
+  const last = state.day === state.days - 1;
+  document.getElementById("next").disabled = last;
+  document.getElementById("next").textContent = last ? "Last day" : "Next day ›";
+  drawDots();
+  if (tg) {
+    tg.MainButton.setText(anyPainted() ? "Send my availability" : "Send (nothing picked)");
+    tg.MainButton.show();
+  }
+}
+function anyPainted() {
+  for (let i = 0; i < cells(); i++) if (getBit(state.mine, i)) return true;
+  return false;
+}
+function drawDots() {
+  const box = document.getElementById("dots");
+  box.innerHTML = "";
+  for (let i = 0; i < state.days; i++) {
+    const d = document.createElement("div");
+    d.className = "dot" + (i === state.day ? " on" : dayHasAny(i) ? " done" : "");
+    d.textContent = dayDate(i).getDate();
+    d.onclick = () => { state.day = i; paint(); };
+    box.appendChild(d);
+  }
+}
+
+// --- painting ------------------------------------------------------------
+let mode = null;                  // true = paint, false = erase
+function applyTo(el) {
+  if (!el || !el.classList || !el.classList.contains("cell")) return;
+  const i = state.day * ROWS + Number(el.dataset.row);
+  if (mode === null) mode = !getBit(state.mine, i);   // whatever the first cell needs
+  setBit(state.mine, i, mode);
+  el.classList.toggle("mine", mode);
+}
+grid.addEventListener("pointerdown", (e) => {
+  mode = null;
+  applyTo(e.target);
+  grid.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+grid.addEventListener("pointermove", (e) => {
+  if (mode === null && e.buttons === 0) return;
+  if (e.buttons === 0 && e.pointerType === "mouse") return;
+  applyTo(document.elementFromPoint(e.clientX, e.clientY));
+});
+grid.addEventListener("pointerup", () => { mode = null; drawDots(); paint(); });
+grid.addEventListener("pointercancel", () => { mode = null; });
+
+// --- moving between days -------------------------------------------------
+document.getElementById("prev").onclick = () => { if (state.day > 0) { state.day--; paint(); } };
+document.getElementById("next").onclick = () => {
+  if (state.day < state.days - 1) { state.day++; paint(); }
+};
+document.getElementById("copy").onclick = () => {
+  const from = (state.day - 1) * ROWS, to = state.day * ROWS;
+  for (let r = 0; r < ROWS; r++) setBit(state.mine, to + r, getBit(state.mine, from + r));
+  paint();
+};
+
+// --- sending -------------------------------------------------------------
+function payload() {
+  return JSON.stringify({
+    v: 1, c: Number(state.chat), e: state.code,
+    d0: state.first, nd: state.days, me: toB64(state.mine),
+  });
+}
+function send() {
+  if (tg) { tg.sendData(payload()); return; }        // Telegram closes the app
+  const out = document.getElementById("debug");
+  out.hidden = false;
+  out.textContent = "Would send:\n" + payload();
+}
+
+document.getElementById("event").textContent =
+  state.name + (state.total ? ` · ${state.total} answered so far` : " · you are first");
+document.getElementById("tot").textContent = "";
+build();
+
+if (tg) {
+  tg.ready();
+  tg.expand();
+  const th = tg.themeParams || {};
+  const set = (name, value) => value && document.documentElement.style.setProperty(name, value);
+  set("--bg", th.bg_color); set("--fg", th.text_color); set("--hint", th.hint_color);
+  set("--card", th.secondary_bg_color); set("--accent", th.button_color);
+  set("--line", th.section_separator_color || th.hint_color);
+  tg.MainButton.onClick(send);
+} else {
+  document.getElementById("standalone").hidden = false;
+  const b = document.createElement("button");
+  b.className = "primary";
+  b.textContent = "Show what would be sent";
+  b.onclick = send;
+  document.querySelector(".foot").after(b);
+}
+</script>
+</body>
+</html>

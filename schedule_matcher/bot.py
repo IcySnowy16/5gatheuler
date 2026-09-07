@@ -10,14 +10,14 @@ import logging
 import re
 import random
 import string
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from telegram import Update
 from telegram.ext import (ApplicationBuilder, CallbackQueryHandler,
                           CommandHandler, ContextTypes, MessageHandler, filters)
 
 from . import (ask, availability_view, config, flows, keyboards, matching,
-               storage)
+               storage, webapp)
 from .booking import groupbook
 from .booking import handlers as booking_handlers
 
@@ -193,8 +193,205 @@ def _identity(update: Update) -> tuple[int, str]:
     return user.id, name
 
 
+# --- The availability grid: a Mini App, because a chat cannot drag ---------
+#
+# Telegram keyboards are discrete buttons capped at 8 per row and 100 in
+# total, so a paintable week (224 half-hour cells) cannot exist in a message.
+# The grid is a web page opened inside Telegram instead.
+#
+# One rule shapes the whole flow: sendData - the only way a page can answer
+# without us running a server - works solely from a reply-keyboard button in a
+# PRIVATE chat, while events live in groups. So the group carries a link and
+# the painting happens in the DM.
+
+def _deep_link(bot, chat_id: int, code: str) -> str:
+    """A t.me link that opens one group's event in the private chat.
+
+    Start payloads allow only letters, digits, _ and -, so the group's
+    negative id travels with its sign written as 'n'.
+    """
+    return (f"https://t.me/{bot.username}?start="
+            f"add_{str(chat_id).replace('-', 'n')}_{code}")
+
+
+def _parse_deep_link(payload: str) -> tuple[int, str] | None:
+    if not payload.startswith("add_"):
+        return None
+    try:
+        _, raw_chat, code = payload.split("_", 2)
+        return int(raw_chat.replace("n", "-", 1)), code.upper()
+    except ValueError:
+        return None
+
+
+async def _open_grid(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                     chat_id: int, code: str) -> bool:
+    """Offer the painting grid in a private chat. False if it cannot be."""
+    from telegram import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
+
+    if update.effective_chat.type != "private":
+        return False
+    event = storage.get_event(chat_id, code)
+    if not event:
+        return False
+    days = storage.event_days(event)
+    url = webapp.url_for(chat_id, event, days,
+                         storage.user_slots(chat_id, code, update.effective_user.id),
+                         storage.availabilities(chat_id, code))
+    if not url:
+        return False
+    await update.effective_message.reply_text(
+        f"'{event['name']}' - {days[0]:%a %d %b} to {days[-1]:%a %d %b}.\n\n"
+        "Tap the button under the message box, then drag down the strip to "
+        "paint when you are free. Drag over a painted time again to rub it "
+        "out. What you send replaces your previous answer.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("Open the grid", web_app=WebAppInfo(url=url))]],
+            resize_keyboard=True, one_time_keyboard=True))
+    return True
+
+
+async def on_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A painted grid coming back. Everything in it is a stranger's until checked."""
+    payload = update.effective_message.web_app_data.data
+    data = webapp.read_reply(payload)
+    user_id, user_name = _identity(update)
+    if data is None:
+        await update.effective_message.reply_text(
+            "I couldn't read what the grid sent. Nothing was changed - /add "
+            "opens it again.", reply_markup=persistent_keyboard())
+        return
+
+    chat_id, code = data["chat_id"], data["code"]
+    event = storage.get_event(chat_id, code)
+    if not event:
+        await update.effective_message.reply_text(
+            "That event no longer exists, so I have not saved anything.",
+            reply_markup=persistent_keyboard())
+        return
+
+    # The page is a public URL and the DM has no idea which group is which, so
+    # anyone could name any chat id. Ask Telegram whether they belong there.
+    if chat_id != user_id:
+        try:
+            member = await context.bot.get_chat_member(chat_id, user_id)
+            allowed = member.status not in ("left", "kicked")
+        except Exception:
+            log.warning("membership check failed for %s in %s", user_id, chat_id)
+            allowed = False
+        if not allowed:
+            await update.effective_message.reply_text(
+                "That event belongs to a group you are not in, so I have not "
+                "saved anything.", reply_markup=persistent_keyboard())
+            return
+
+    storage.replace_slots(chat_id, code, user_id, user_name, data["intervals"])
+    merged = matching.merge_intervals(data["intervals"])
+    if merged:
+        lines = "\n".join(f"  {s:%a %d %b}  {s:%H:%M} - {e:%H:%M}" for s, e in merged)
+        body = f"Saved for '{event['name']}':\n{lines}"
+    else:
+        body = (f"Saved for '{event['name']}': you are not free on any of "
+                "those days.")
+    await update.effective_message.reply_text(
+        f"{body}\n\nSend it again any time to change it - the newest answer "
+        f"replaces the last. /best {code} 60 finds the best common time.",
+        reply_markup=persistent_keyboard())
+    await _update_board(context.bot, chat_id, code)
+
+
+async def _update_board(bot, chat_id: int, code: str) -> None:
+    """Edit the one group message that tracks who has answered.
+
+    Editing rather than posting is the whole point: a group of five would
+    otherwise collect five "X added their times" messages per event.
+    """
+    event = storage.get_event(chat_id, code)
+    if not event:
+        return
+    try:
+        board_chat, board_msg = event["board_chat_id"], event["board_msg_id"]
+    except (IndexError, KeyError):
+        return
+    if not board_chat or not board_msg:
+        return
+    try:
+        await bot.edit_message_text(
+            chat_id=board_chat, message_id=board_msg,
+            text=_board_text(chat_id, code),
+            reply_markup=_paint_markup(bot, chat_id, code))
+    except Exception:
+        log.debug("could not update the board for %s", code, exc_info=True)
+
+
+def _board_text(chat_id: int, code: str) -> str:
+    event = storage.get_event(chat_id, code)
+    days = storage.event_days(event)
+    avail = storage.availabilities(chat_id, code)
+    who = ", ".join(sorted(avail)) if avail else "nobody yet"
+    return (f"{event['name']}  (code {code})\n"
+            f"{days[0]:%a %d %b} to {days[-1]:%a %d %b}\n\n"
+            f"Answered: {who}\n\n"
+            f"/view shows the grid, /best {code} 60 the best times.")
+
+
+def _paint_markup(bot, chat_id: int, code: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    if not config.WEBAPP_URL:
+        return None
+    return InlineKeyboardMarkup([[InlineKeyboardButton(
+        "Paint my availability", url=_deep_link(bot, chat_id, code))]])
+
+
+async def _post_board(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                      chat_id: int, code: str) -> None:
+    msg = await update.effective_message.reply_text(
+        _board_text(chat_id, code),
+        reply_markup=_paint_markup(context.bot, chat_id, code))
+    storage.set_event_board(chat_id, code, msg.chat_id, msg.message_id)
+
+
+# --- Which days is the event about ----------------------------------------
+
+DATE_PRESETS = (("The next 7 days", "7"), ("The next 14 days", "14"),
+                ("Next week, Mon-Sun", "mon"))
+
+
+async def _ask_dates(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                     code: str, name: str) -> None:
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    rows = [[InlineKeyboardButton(label, callback_data=f"evd|{code}|{key}")]
+            for label, key in DATE_PRESETS]
+    rows.append([InlineKeyboardButton("Pick the dates on a calendar",
+                                      callback_data=f"evd|{code}|cal")])
+    await update.effective_message.reply_text(
+        f"'{name}' created, code {code}.\n\nWhich days is it about? Everyone "
+        "paints their availability across these days.",
+        reply_markup=InlineKeyboardMarkup(rows))
+
+
+def _preset_range(key: str) -> tuple[date, date]:
+    today = date.today()
+    if key == "14":
+        return today, today + timedelta(days=13)
+    if key == "mon":
+        monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
+        return monday, monday + timedelta(days=6)
+    return today, today + timedelta(days=6)
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Greet with the help text, the persistent keyboard and the menu."""
+    """Greet with the help text, the persistent keyboard and the menu.
+
+    A deep link from a group - "open the grid for this event" - arrives here
+    as the start payload. That indirection exists because a Mini App may only
+    send its answer back from a private chat, while events live in groups.
+    """
+    target = _parse_deep_link((context.args or [""])[0])
+    if target and await _open_grid(update, context, *target):
+        return
     if update.effective_chat.type == "private":
         await update.effective_message.reply_text(
             HELP, reply_markup=persistent_keyboard())
@@ -327,6 +524,9 @@ async def _create_event(update: Update, context: ContextTypes.DEFAULT_TYPE,
     name = name.strip()[:80] or _default_event_name(update.effective_chat.id)
     code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
     storage.create_event(update.effective_chat.id, code, name, update.effective_user.id)
+    if config.WEBAPP_URL:
+        await _ask_dates(update, context, code, name)
+        return
     await update.effective_message.reply_text(
         f"Event '{name}' created!\nCode: {code}\nEveryone: use /add to enter availability.")
 
@@ -355,12 +555,28 @@ def _events_keyboard(chat_id: int, prefix: str):
 
 
 async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = _events_keyboard(update.effective_chat.id, "evt")
-    if not kb:
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    chat_id = update.effective_chat.id
+    rows = storage.list_events(chat_id)
+    if not rows:
         await update.effective_message.reply_text("No events yet - /create <Name> first.")
         return
+    # In a group the grid cannot open: Telegram only lets a Mini App answer
+    # from a private chat. So the group gets one message of links, and the
+    # painting happens where it is allowed to happen.
+    if update.effective_chat.type != "private" and config.WEBAPP_URL:
+        await update.effective_message.reply_text(
+            "Paint your availability - this opens our private chat:",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(f"{r['name']} ({r['code']})",
+                                       url=_deep_link(context.bot, chat_id, r["code"]))]
+                 for r in rows]))
+        return
+    if len(rows) == 1 and await _open_grid(update, context, chat_id, rows[0]["code"]):
+        return
     await flows.start(update, context, flows.SCHEDULE, "Which event?",
-                      reply_markup=kb)
+                      reply_markup=_events_keyboard(chat_id, "evt"))
 
 
 async def cmd_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -515,6 +731,29 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "ignore":
         return
 
+    if action == "evd":
+        code, key = parts[1], parts[2]
+        event = storage.get_event(chat_id, code)
+        if not event:
+            await query.edit_message_text("That event no longer exists.")
+            return
+        if key == "cal":
+            # Reuse the month calendar: the first tap is the first day, the
+            # second the last. A flag on chat_data tells the date| branch that
+            # this calendar is choosing a range, not a day to add times to.
+            context.chat_data["range_pick"] = {"code": code, "first": None}
+            now = datetime.now()
+            await query.edit_message_text(
+                f"'{event['name']}' - tap the FIRST day it covers:",
+                reply_markup=keyboards.month_calendar(now.year, now.month, code))
+            return
+        start, end = _preset_range(key)
+        storage.set_event_dates(chat_id, code, start, end)
+        await query.edit_message_text(
+            f"'{event['name']}' covers {start:%a %d %b} to {end:%a %d %b}.")
+        await _post_board(update, context, chat_id, code)
+        return
+
     if action == "best":
         await _best_duration_prompt(query, chat_id, parts[1])
         return
@@ -572,6 +811,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "evt":
         code = parts[1]
+        if await _open_grid(update, context, chat_id, code):
+            await query.edit_message_text(
+                f"Opening the grid for '{event['name']}'.\n\n"
+                "Prefer tapping through a calendar? /edit still does that.")
+            return
         now = datetime.now()
         await query.edit_message_text(
             f"Pick dates for '{event['name']}'{_slots_summary(chat_id, code, user_id)}",
@@ -585,6 +829,28 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "date":
         year, month, day, code = int(parts[1]), int(parts[2]), int(parts[3]), parts[4]
+        picking = context.chat_data.get("range_pick")
+        if picking and picking.get("code") == code:
+            chosen = date(year, month, day)
+            if picking["first"] is None:
+                picking["first"] = chosen.isoformat()
+                await query.edit_message_text(
+                    f"First day {chosen:%a %d %b}. Now tap the LAST day:",
+                    reply_markup=keyboards.month_calendar(year, month, code))
+                return
+            first = date.fromisoformat(picking["first"])
+            context.chat_data.pop("range_pick", None)
+            start, end = min(first, chosen), max(first, chosen)
+            span = (end - start).days + 1
+            if span > webapp.MAX_DAYS:
+                end = start + timedelta(days=webapp.MAX_DAYS - 1)
+            storage.set_event_dates(chat_id, code, start, end)
+            note = (f"\n(Trimmed to {webapp.MAX_DAYS} days - that is as many "
+                    "as the grid paints at once.)" if span > webapp.MAX_DAYS else "")
+            await query.edit_message_text(
+                f"'{event['name']}' covers {start:%a %d %b} to {end:%a %d %b}.{note}")
+            await _post_board(update, context, chat_id, code)
+            return
         await query.edit_message_text(
             f"Start time on {year}-{month:02d}-{day:02d}:{_slots_summary(chat_id, code, user_id)}",
             reply_markup=keyboards.start_time_picker(year, month, day, code))
@@ -803,6 +1069,8 @@ def main() -> None:
     application.add_handler(MessageHandler(
         filters.TEXT & filters.ChatType.PRIVATE
         & filters.Text(list(KEYBOARD_LABELS)), on_keyboard_label), group=-1)
+    application.add_handler(MessageHandler(
+        filters.StatusUpdate.WEB_APP_DATA, on_web_app_data))
     application.add_handler(CallbackQueryHandler(on_callback))
 
     application.add_error_handler(on_error)
