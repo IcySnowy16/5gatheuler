@@ -248,6 +248,7 @@ python -m pyflakes schedule_matcher/*.py schedule_matcher/booking/*.py
 python tests/smoke_handlers.py     # every command and callback, does it raise?
 python tests/schedule_flows.py     # is the scheduling half's answer correct?
 python tests/webapp_page.py        # drives the grid in a real browser
+python tests/booking_categories.py # every library category, in every mode
 ```
 
 `tests/smoke_handlers.py` calls every command and callback branch with mock

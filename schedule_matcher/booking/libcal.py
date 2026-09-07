@@ -110,15 +110,30 @@ def _merge_catalogue(locations: list[Location]) -> None:
             existing.label = label      # the site's wording beats the homepage's
 
 
+def _normalise(locations: list[Location]) -> list[Location]:
+    """Whatever the list came from, make it the list we actually offer.
+
+    Both the homepage and the day-old cache can be missing categories or
+    carrying "All Categories", which is a view with no grid of its own. This
+    runs on every path - including the cached one, which is how Griffin Booth
+    stayed invisible for a day after it was first fixed.
+    """
+    for loc in locations:
+        loc.categories = [c for c in loc.categories if c.gid]
+    _merge_catalogue(locations)
+    return [loc for loc in locations if loc.categories]
+
+
 async def fetch_locations(force: bool = False) -> list[Location]:
     """Every library and its categories: the homepage, plus the catalogue."""
     if not force:
         cached = storage.cache_get("libcal_locations", max_age_hours=24)
         if cached:
-            return [
-                Location(name=loc["name"], categories=[Category(**c) for c in loc["categories"]])
+            return _normalise([
+                Location(name=loc["name"],
+                         categories=[Category(**c) for c in loc["categories"]])
                 for loc in cached
-            ]
+            ])
     async with _client() as client:
         resp = await client.get("/")
         resp.raise_for_status()
@@ -151,7 +166,7 @@ async def fetch_locations(force: bool = False) -> list[Location]:
             cats.append(Category(label=label, lid=lid, gid=gid, url=href))
         if cats and "staff only" not in name.lower():
             locations.append(Location(name=name, categories=cats))
-    _merge_catalogue(locations)
+    locations = _normalise(locations)
     if locations:
         storage.cache_set(
             "libcal_locations",

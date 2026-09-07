@@ -368,3 +368,40 @@ Is it one of these, or a booking of its own?
 Writing the fix turned up a latent trap in the five generic `update_*(id,
 **fields)` helpers: with no fields they built `UPDATE bookings SET  WHERE
 id=?` and raised `sqlite3.OperationalError`. An empty update is now a no-op.
+
+
+---
+
+## Fixed 8 Sep: Griffin Booth was still missing from a running bot
+
+Reported with a screenshot of the live picker: "All Categories" and ten Lee
+Wee Nam categories, no Griffin Booth - exactly the list the 7 Sep fix was
+supposed to correct.
+
+The fix was real but incomplete. `fetch_locations()` merges the catalogue into
+the homepage parse, which is what makes Griffin Booth and the three Humanities
+categories visible - but only on the path that rebuilds the list. The cached
+path returns 24 hours early:
+
+```python
+cached = storage.cache_get("libcal_locations", max_age_hours=24)
+if cached:
+    return [Location(...) for loc in cached]   # merge never runs
+```
+
+The database confirmed it: one `kv` row written 4 Sep 10:43 holding eleven Lee
+Wee Nam entries, the first of them `All Categories | gid 0` - the row cut off
+at the top of the screenshot.
+
+Now a single `_normalise()` runs on every path, cached or fresh: it drops
+`gid=0` views and merges the catalogue. Against the live database the picker
+went from that stale eleven to the correct 25 across six libraries, with no
+"All Categories" rows.
+
+Checked at the same time, since the report asked: every one of the 25
+categories the catalogue knows is offered, none is offered that the catalogue
+does not know, and every one returns a real availability grid - AV Room 1
+space through Arrakis 20 and PC / Single Monitor 18. All four modes - Book,
+Schedule, Extended, Repeat - draw from the same list, which
+`tests/booking_categories.py` now proves by seeding that exact stale cache and
+walking each mode into the category screen.
