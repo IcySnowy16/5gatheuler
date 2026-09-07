@@ -1493,6 +1493,92 @@ async def _proof_only(bot, user_id: int, booking, code: str) -> None:
             pass
 
 
+def _space_matches(row, space: str) -> bool:
+    """Same desk, ignoring the '(Capacity 1)' tail and case."""
+    def bare(name):
+        return (name or "").split(" (")[0].strip().lower()
+    return bool(space) and bare(row["room_name"]) == bare(space)
+
+
+async def _file_code(send, context, user_id: int, code: str, found: dict,
+                     match) -> None:
+    """Save the code against `match`, or as a new booking when it is None.
+
+    Only what the site actually said is written. It often knows nothing but
+    the start time - the refusal before a check-in window opens names that and
+    nothing else - and overwriting a real desk name with "your booking" and a
+    real end time with a guess loses information the bot already had.
+    """
+    start, end = found["start"], found["end"]
+    if match is None:
+        booking_id = storage.add_booking(
+            user_id, found["location"] or "(booked by you)", "your own booking",
+            found["space"] or "your booking", None,
+            start, end or (start + timedelta(hours=2)))
+        lead = "I didn't know about this booking, so I've added it"
+    else:
+        booking_id = match["id"]
+        fields = {}
+        if found["space"]:
+            fields["room_name"] = found["space"]
+        if found["location"]:
+            fields["location"] = found["location"]
+        # Times are only rewritten when the site gave a complete, sane pair -
+        # which happens on a successful check-in. Writing just the start would
+        # take a booking you picked yourself and leave it ending before it
+        # begins, and the local times came from a real confirmation anyway.
+        if end and end > start:
+            fields["start_ts"] = start.strftime(storage.FMT)
+            fields["end_ts"] = end.strftime(storage.FMT)
+        if fields:
+            storage.update_booking(booking_id, **fields)
+        lead = "Matched your booking"
+
+    _apply_capture(booking_id, {"checkin_code": code})
+    booking = storage.get_booking(booking_id)
+    shown_start = datetime.strptime(booking["start_ts"], storage.FMT)
+    shown_end = datetime.strptime(booking["end_ts"], storage.FMT)
+    details = (f"{booking['room_name']}\n{booking['location']}\n"
+               f"{shown_start:%a %d %b, %H:%M} - {shown_end:%H:%M}")
+
+    if found["checked_in"]:
+        storage.update_booking(booking_id, status="checked_in")
+        tasks.spawn(_proof_only(context.bot, user_id, booking, code),
+                    bot=context.bot, user_id=user_id,
+                    feature="the check-in photo", notify=None)
+        await send(f"✅ Checked in.\n\n{details}\n\n"
+                   f"Code {code} saved. Check out with /cancelbooking when you "
+                   f"leave - the space is yours until {shown_end:%H:%M}.")
+    else:
+        await send(f"{lead}:\n\n{details}\n\nCode {code} saved. I'll check you "
+                   "in automatically from 2 minutes before it starts.")
+
+
+async def _ask_which_booking_for_code(message, context, code: str, found: dict,
+                                      candidates) -> None:
+    """The site gave a time but no desk, so it cannot say which booking this
+    is. Offer the ones it could be, and the option of a separate booking."""
+    context.user_data["code_pending"] = {"code": code, "found": found}
+    start = found["start"]
+    # Closest to the time the site gave first: that is almost always the one.
+    ordered = sorted(candidates, key=lambda r: abs(
+        (datetime.strptime(r["start_ts"], storage.FMT) - start).total_seconds()))
+    kb = []
+    for r in ordered:
+        taken = " - already has a code" if r["checkin_code"] else ""
+        kb.append([InlineKeyboardButton(
+            f"{r['room_name'].split(' (')[0]} {r['start_ts'][-5:]}"
+            f"-{r['end_ts'][-5:]}{taken}",
+            callback_data=f"bk|codeto|{r['id']}")])
+    kb.append([InlineKeyboardButton("A separate booking I made myself",
+                                    callback_data="bk|codenew")])
+    await message.reply_text(
+        f"Code {code} is for a booking starting {start:%H:%M} on "
+        f"{start:%a %d %b}, but the library did not say which space.\n\n"
+        "Is it one of these, or a booking of its own?",
+        reply_markup=InlineKeyboardMarkup(kb))
+
+
 async def _attach_code(update, context, code: str, rows) -> bool:
     """Ask the site what this code is for, and file it correctly.
 
@@ -1533,44 +1619,30 @@ async def _attach_code(update, context, code: str, rows) -> bool:
     if not start:
         return False                       # knew the code but not the time
 
-    end = found["end"] or (start + timedelta(hours=2))
-    space = found["space"] or "your booking"
-    where = found["location"] or "(booked by you)"
+    # Anything of yours that day could be the one - the site's own answer
+    # decides when it can, and you decide when it cannot.
+    candidates = [b for b in rows
+                  if datetime.strptime(b["start_ts"], storage.FMT).date()
+                  == start.date()]
+    send = update.effective_message.reply_text
 
-    match = next((b for b in rows
-                  if abs((datetime.strptime(b["start_ts"], storage.FMT)
-                          - start).total_seconds()) <= 15 * 60), None)
-    if match is None:
-        booking_id = storage.add_booking(user_id, where, "your own booking",
-                                         space, None, start, end)
-        match = storage.get_booking(booking_id)
-        lead = "I didn't know about this booking, so I've added it"
-    else:
-        # The site is authoritative: correct whatever we had.
-        storage.update_booking(match["id"], room_name=space, location=where,
-                               start_ts=start.strftime(storage.FMT),
-                               end_ts=end.strftime(storage.FMT))
-        match = storage.get_booking(match["id"])
-        lead = "Matched your booking"
+    if found["space"]:
+        # The site named the desk, so there is nothing to guess.
+        match = next((b for b in candidates
+                      if _space_matches(b, found["space"])), None)
+        if match is None:
+            match = next((b for b in candidates
+                          if abs((datetime.strptime(b["start_ts"], storage.FMT)
+                                  - start).total_seconds()) <= 15 * 60), None)
+        await _file_code(send, context, user_id, code, found, match)
+        return True
 
-    _apply_capture(match["id"], {"checkin_code": code})
-    details = (f"{space}\n{where}\n{start:%a %d %b, %H:%M} - {end:%H:%M}")
-    if found["checked_in"]:
-        storage.update_booking(match["id"], status="checked_in")
-        # probe_code checks in as a side effect, so there is no screenshot yet.
-        # Take one in the background: asking the site again just answers
-        # "Already Checked In", which is exactly the proof worth keeping.
-        tasks.spawn(_proof_only(context.bot, user_id, storage.get_booking(match["id"]), code),
-                    bot=context.bot, user_id=user_id, feature="the check-in photo",
-                    notify=None)
-        await update.effective_message.reply_text(
-            f"✅ Checked in.\n\n{details}\n\n"
-            f"Code {code} saved. Check out with /cancelbooking when you leave "
-            f"- the space is yours until {end:%H:%M}.")
-    else:
-        await update.effective_message.reply_text(
-            f"{lead}:\n\n{details}\n\nCode {code} saved. I'll check you in "
-            "automatically from 2 minutes before it starts.")
+    if candidates:
+        await _ask_which_booking_for_code(update.effective_message, context,
+                                          code, found, candidates)
+        return True
+
+    await _file_code(send, context, user_id, code, found, None)
     return True
 
 async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2573,6 +2645,24 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 + f": {_rule_line(rule)}"
                 + ("\n\nI will not set up any more weeks until you resume it."
                    if pausing else ""))
+            return
+
+        if action in ("codeto", "codenew"):
+            pending = context.user_data.pop("code_pending", None)
+            if not pending:
+                await query.edit_message_text(
+                    "That question expired - send the code again and I'll ask "
+                    "once more.")
+                return
+            match = None
+            if action == "codeto":
+                match = storage.get_booking(int(parts[2]))
+                if match is None or match["user_id"] != query.from_user.id:
+                    await query.edit_message_text("That booking is gone already.")
+                    return
+            await _file_code(query.edit_message_text, context,
+                             query.from_user.id, pending["code"],
+                             pending["found"], match)
             return
 
         if action == "scancel":

@@ -318,3 +318,53 @@ Window Seat seat=1  -> 10 spaces (WS01-WS10)
 the ids the public grid returned is a seat category - and records `seats:
 true`, which `fetch_grid` then honours. Griffin Booth is an ordinary category
 (12 spaces) and needs none of it.
+
+
+---
+
+## Fixed 7 Sep: a code overwrote the booking it was attached to
+
+Reported from the chat, with the evidence in one screenshot. Before
+`/code M3P5`:
+
+```
+#2 LIBLWNL-AK-01 (Capacity 1) (Lee Wee Nam Library) 17:30 to 19:00 - no code
+```
+
+after:
+
+```
+#2 your booking ((booked by you)) 17:30 to 19:30 - code M3P5
+```
+
+The desk name, the library and the end time were all replaced with
+placeholders. `_attach_code` computed `space = found["space"] or "your
+booking"`, `where = found["location"] or "(booked by you)"` and `end =
+found["end"] or start + 2h`, then wrote all four fields back over the matched
+row - so when the site knew only the start time, which is the normal answer
+before a check-in window opens, three real values were traded for invented
+ones and a 90-minute booking silently became two hours.
+
+Now only what the site actually said is written, and the times are rewritten
+only when it gives a complete, sane pair (a successful check-in reports both).
+The reply is rendered from the stored row afterwards, so it shows the real
+desk rather than the probe's blanks.
+
+**And the bot no longer guesses which booking a code belongs to.** When the
+site names the space, that settles it. When it gives only a time - as here -
+the bot asks, offering that day's bookings closest-first plus "a separate
+booking I made myself":
+
+```
+Code M3P5 is for a booking starting 17:30 on Mon 07 Sep, but the library
+did not say which space.
+
+Is it one of these, or a booking of its own?
+  [ LIBLWNL-AK-01 17:30-19:00 ]
+  [ your booking 13:30-15:30 - already has a code ]
+  [ A separate booking I made myself ]
+```
+
+Writing the fix turned up a latent trap in the five generic `update_*(id,
+**fields)` helpers: with no fields they built `UPDATE bookings SET  WHERE
+id=?` and raised `sqlite3.OperationalError`. An empty update is now a no-op.

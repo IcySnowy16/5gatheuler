@@ -371,6 +371,8 @@ def availabilities(chat_id: int, code: str) -> dict[str, list[tuple[datetime, da
 def save_user(user_id: int, **fields) -> None:
     c = conn()
     c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    if not fields:
+        return                       # nothing to change: not a SQL statement
     sets = ", ".join(f"{k}=?" for k in fields)
     c.execute(
         f"UPDATE users SET {sets}, updated_at=datetime('now','localtime') WHERE user_id=?",
@@ -433,6 +435,8 @@ def bookings_needing_checkin() -> list[sqlite3.Row]:
 
 def update_booking(booking_id: int, **fields) -> None:
     c = conn()
+    if not fields:
+        return                       # nothing to change: not a SQL statement
     sets = ", ".join(f"{k}=?" for k in fields)
     c.execute(f"UPDATE bookings SET {sets} WHERE id=?", (*fields.values(), booking_id))
     c.commit()
@@ -588,6 +592,8 @@ def session_legs(chat_id: int, msg_id: int) -> list[sqlite3.Row]:
 
 def update_leg(leg_id: int, **fields) -> None:
     c = conn()
+    if not fields:
+        return                       # nothing to change: not a SQL statement
     sets = ", ".join(f"{k}=?" for k in fields)
     c.execute(f"UPDATE group_legs SET {sets} WHERE id=?", (*fields.values(), leg_id))
     c.commit()
@@ -637,6 +643,8 @@ def active_rules() -> list[sqlite3.Row]:
 
 def update_rule(rule_id: int, **fields) -> None:
     c = conn()
+    if not fields:
+        return                       # nothing to change: not a SQL statement
     sets = ", ".join(f"{k}=?" for k in fields)
     c.execute(f"UPDATE recurring_rules SET {sets} WHERE id=?",
               (*fields.values(), rule_id))
@@ -707,6 +715,8 @@ def list_scheduled(user_id: int) -> list[sqlite3.Row]:
 
 def update_scheduled(job_id: int, **fields) -> None:
     c = conn()
+    if not fields:
+        return                       # nothing to change: not a SQL statement
     sets = ", ".join(f"{k}=?" for k in fields)
     c.execute(f"UPDATE scheduled_bookings SET {sets} WHERE id=?", (*fields.values(), job_id))
     c.commit()
