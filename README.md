@@ -195,7 +195,14 @@ Telegram, served straight from this repo.
 **Turn it on once:** repo Settings → Pages → Source *Deploy from a branch* →
 `main` / `/docs`. That publishes `docs/index.html` at
 `https://<user>.github.io/5gatheuler`, which is what `WEBAPP_URL` points at.
-Until it is on, set `WEBAPP_URL=` (empty) and the bot uses the old calendar.
+
+Syncing the folder to another machine does **not** do this. The page has to be
+reachable by Telegram on somebody's phone, which needs a public HTTPS address;
+OneDrive or a shared drive only moves files between your own computers.
+
+If it is not published the bot notices at startup, says so in the log, and
+falls back to the tap-through calendar - so nothing breaks and no button ever
+opens a 404. Set `WEBAPP_URL=` (empty) to switch the grid off deliberately.
 
 Nothing is hosted by us and no server is added. Everything the page needs
 arrives in the URL - the days, your current answer, and everyone else's as a

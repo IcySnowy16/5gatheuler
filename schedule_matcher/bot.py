@@ -1114,6 +1114,40 @@ class _RedactToken(logging.Filter):
         return True
 
 
+async def _check_grid_published() -> None:
+    """A working grid or none at all - never a button that goes nowhere.
+
+    The Mini App has to be reachable by Telegram on someone's phone, which a
+    synced folder cannot do: it needs a public HTTPS address. If the page is
+    not published, the bot quietly falls back to the tap-through calendar
+    rather than offering a button that opens a 404.
+    """
+    import httpx
+
+    url = config.WEBAPP_URL
+    if not url:
+        log.info("Availability grid: off (WEBAPP_URL is empty), using the "
+                 "calendar pickers.")
+        return
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            resp = await client.get(url)
+        published = (resp.status_code == 200
+                     and "telegram-web-app.js" in resp.text)
+        why = f"HTTP {resp.status_code}"
+    except Exception as exc:                                  # offline, DNS, TLS
+        published, why = False, f"{type(exc).__name__}: {exc}"
+    if published:
+        log.info("Availability grid: live at %s", url)
+        return
+    config.WEBAPP_URL = ""
+    log.warning(
+        "Availability grid at %s is not published (%s), so /create and /add "
+        "will use the tap-through calendar instead. To switch the grid on, "
+        "enable GitHub Pages for the repo: Settings > Pages > Deploy from a "
+        "branch > main > /docs.", url, why)
+
+
 def main() -> None:
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -1147,6 +1181,7 @@ def main() -> None:
                 scope=BotCommandScopeAllGroupChats())
         except Exception:
             log.warning("could not publish the command menu", exc_info=True)
+        await _check_grid_published()
         app.create_task(scheduler.run(app))
         app.create_task(holds.watcher(app))
         app.create_task(holds.restore(app))     # re-take holds a restart dropped
