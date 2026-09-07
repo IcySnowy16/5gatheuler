@@ -76,8 +76,42 @@ def _client() -> httpx.AsyncClient:
     )
 
 
+def _merge_catalogue(locations: list[Location]) -> None:
+    """Add the categories the homepage does not name, and use the site's own
+    wording for the ones it does.
+
+    The homepage is public but incomplete: a category linked as
+    /reserve/collab (Griffin Booth) or /space/52771 (three of the four in the
+    Humanities library) carries no lid/gid in its URL, so the parse above
+    threw it away and those spaces could not be booked at all. The catalogue
+    knows their ids and their real names, and it ships with the code in
+    catalog_seed.json, so this fills the gaps without anyone logging in.
+    """
+    from . import catalog
+
+    by_name = {loc.name: loc for loc in locations}
+    for entry in catalog.all_categories():
+        lid, gid = entry.get("lid"), entry.get("gid")
+        label, library = entry.get("category"), entry.get("library")
+        if not (lid and gid and label and library):
+            continue
+        loc = by_name.get(library)
+        if loc is None:
+            loc = Location(name=library, categories=[])
+            by_name[library] = loc
+            locations.append(loc)
+        existing = next((c for c in loc.categories
+                         if c.lid == lid and c.gid == gid), None)
+        if existing is None:
+            loc.categories.append(Category(
+                label=label, lid=lid, gid=gid,
+                url=f"/spaces?lid={lid}&gid={gid}"))
+        else:
+            existing.label = label      # the site's wording beats the homepage's
+
+
 async def fetch_locations(force: bool = False) -> list[Location]:
-    """Parse the homepage panels (library -> category links). Cached 24h."""
+    """Every library and its categories: the homepage, plus the catalogue."""
     if not force:
         cached = storage.cache_get("libcal_locations", max_age_hours=24)
         if cached:
@@ -107,13 +141,17 @@ async def fetch_locations(force: bool = False) -> list[Location]:
             except ValueError:
                 continue
             label = a.get_text(strip=True)
-            if not label or lid == 0:
-                continue  # /space/NNN and /reserve links have no grid; skip for now
+            if not label or lid == 0 or gid == 0:
+                # lid=0/gid=0 is the "All Categories" view, which has no grid
+                # of its own. Links without ids at all (/space/NNN,
+                # /reserve/collab) are picked up from the catalogue below.
+                continue
             if any(c.lid == lid and c.gid == gid for c in cats):
                 continue  # one <li> sometimes holds two <a>s to the same target
             cats.append(Category(label=label, lid=lid, gid=gid, url=href))
         if cats and "staff only" not in name.lower():
             locations.append(Location(name=name, categories=cats))
+    _merge_catalogue(locations)
     if locations:
         storage.cache_set(
             "libcal_locations",
@@ -122,12 +160,30 @@ async def fetch_locations(force: bool = False) -> list[Location]:
     return locations
 
 
-async def fetch_grid(lid: int, gid: int, day: date) -> dict[int, list[Cell]]:
+def is_seat_category(lid: int, gid: int) -> bool:
+    """Does this category book individual seats rather than whole spaces?
+
+    The Humanities library works that way: asking for its grid normally
+    answers with one item - the room itself, the /space/NNNNN the homepage
+    links - and the four Study Pods or ten Window Seats only appear when the
+    request says seat=1. Booking the room is not what anyone means, so these
+    categories are always fetched seat-wise.
+    """
+    from . import catalog
+
+    return bool(catalog.get(lid, gid).get("seats"))
+
+
+async def fetch_grid(lid: int, gid: int, day: date,
+                     seat: bool | None = None) -> dict[int, list[Cell]]:
     """15-minute cells per room (itemId) for one day, via the public AJAX grid."""
+    if seat is None:
+        seat = is_seat_category(lid, gid)
     data = {
-        "lid": lid, "gid": gid, "eid": -1, "seat": 0, "seatId": 0, "zone": 0,
+        "lid": lid, "gid": gid, "eid": -1, "seat": 1 if seat else 0,
+        "seatId": 0, "zone": 0,
         "start": day.isoformat(), "end": (day + timedelta(days=1)).isoformat(),
-        "pageIndex": 0, "pageSize": 18,
+        "pageIndex": 0, "pageSize": 100 if seat else 18,
     }
     async with _client() as client:
         resp = await client.post(

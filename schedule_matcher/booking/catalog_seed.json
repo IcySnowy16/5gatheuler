@@ -211,6 +211,39 @@
     "31413": "LWNL Recording Room (Capacity 6)"
    }
   },
+  "3368_8423": {
+   "advance_days": 1,
+   "category": "Griffin Booth",
+   "gid": 8423,
+   "hours": {
+    "0": [
+     "08:30",
+     "21:00"
+    ],
+    "1": [
+     "08:30",
+     "21:00"
+    ]
+   },
+   "library": "Lee Wee Nam Library",
+   "lid": 3368,
+   "max_day": 120,
+   "max_each": 120,
+   "spaces": {
+    "31395": "Griffin Booth 01 (No Monitor) (Capacity 2)",
+    "31396": "Griffin Booth 02 (Monitor only) (Capacity 2)",
+    "31397": "Griffin Booth 03 (Monitor only) (Capacity 2)",
+    "31398": "Griffin Booth 04 (Monitor only) (Capacity 2)",
+    "31399": "Griffin Booth 05 (Monitor only) (Capacity 2)",
+    "31400": "Griffin Booth 06 (Monitor only) (Capacity 2)",
+    "31401": "Griffin Booth 07 (Monitor only) (Capacity 2)",
+    "31402": "Griffin Booth 08 (Monitor only) (Capacity 2)",
+    "31403": "Griffin Booth 09 (Monitor only) (Capacity 4)",
+    "31404": "Griffin Booth 10 (Monitor only) (Capacity 4)",
+    "31406": "Griffin Booth 12 (No Monitor) (Capacity 4)",
+    "31449": "Griffin Booth 11 (Monitor only) (Capacity 4)"
+   }
+  },
   "3368_8442": {
    "advance_days": 1,
    "category": "Tardis - Video Conferencing Room",
@@ -509,6 +542,88 @@
     "48984": "Pod 2 (Capacity 4)",
     "48985": "Pod 3 (Capacity 4)"
    }
+  },
+  "4906_13378": {
+   "advance_days": 3,
+   "category": "Computer Room",
+   "gid": 13378,
+   "hours": {
+    "0": [
+     "08:30",
+     "21:00"
+    ],
+    "1": [
+     "08:30",
+     "21:00"
+    ]
+   },
+   "library": "Humanities & Social Sciences Library",
+   "lid": 4906,
+   "max_day": 360,
+   "seats": true,
+   "spaces": {
+    "7597": "CR1",
+    "7598": "CR2",
+    "7599": "CR3",
+    "7600": "CR4",
+    "7605": "CR5"
+   }
+  },
+  "4906_13380": {
+   "advance_days": 3,
+   "category": "Window Seat",
+   "gid": 13380,
+   "hours": {
+    "0": [
+     "08:30",
+     "21:00"
+    ],
+    "1": [
+     "08:30",
+     "21:00"
+    ]
+   },
+   "library": "Humanities & Social Sciences Library",
+   "lid": 4906,
+   "max_day": 360,
+   "seats": true,
+   "spaces": {
+    "7587": "WS01",
+    "7588": "WS02",
+    "7589": "WS03",
+    "7590": "WS04",
+    "7591": "WS05",
+    "7592": "WS06",
+    "7593": "WS07",
+    "7594": "WS08",
+    "7595": "WS09",
+    "7596": "WS10"
+   }
+  },
+  "4906_13402": {
+   "advance_days": 3,
+   "category": "Study Pod",
+   "gid": 13402,
+   "hours": {
+    "0": [
+     "08:30",
+     "21:00"
+    ],
+    "1": [
+     "08:30",
+     "21:00"
+    ]
+   },
+   "library": "Humanities & Social Sciences Library",
+   "lid": 4906,
+   "max_day": 360,
+   "seats": true,
+   "spaces": {
+    "7554": "SP1",
+    "7555": "SP2",
+    "7556": "SP3",
+    "7557": "SP4"
+   }
   }
  },
  "probed_limits": {
@@ -645,6 +760,17 @@
   "22147": "Le Guin (Mirroring TV) (Capacity 5)",
   "22148": "Tiptree (Mirroring TV) (Capacity 5)",
   "22149": "Wilhelm (Mirroring TV) (Capacity 5)",
+  "31395": "Griffin Booth 01 (No Monitor) (Capacity 2)",
+  "31396": "Griffin Booth 02 (Monitor only) (Capacity 2)",
+  "31397": "Griffin Booth 03 (Monitor only) (Capacity 2)",
+  "31398": "Griffin Booth 04 (Monitor only) (Capacity 2)",
+  "31399": "Griffin Booth 05 (Monitor only) (Capacity 2)",
+  "31400": "Griffin Booth 06 (Monitor only) (Capacity 2)",
+  "31401": "Griffin Booth 07 (Monitor only) (Capacity 2)",
+  "31402": "Griffin Booth 08 (Monitor only) (Capacity 2)",
+  "31403": "Griffin Booth 09 (Monitor only) (Capacity 4)",
+  "31404": "Griffin Booth 10 (Monitor only) (Capacity 4)",
+  "31406": "Griffin Booth 12 (No Monitor) (Capacity 4)",
   "31407": "LWNL Pod 1 (LCD TV) (Capacity 6)",
   "31408": "LWNL Pod 2 (LCD TV) (Capacity 6)",
   "31409": "LWNL Pod 3 (LCD TV) (Capacity 6)",
@@ -681,6 +807,7 @@
   "31443": "Study Room M (Capacity 1)",
   "31444": "Study Room N (Capacity 1)",
   "31445": "AV Room (Capacity 30)",
+  "31449": "Griffin Booth 11 (Monitor only) (Capacity 4)",
   "45999": "Bloomberg-01 (Capacity 1)",
   "46001": "Bloomberg-02 (Capacity 1)",
   "46002": "LIBLWNL-AK-01 (Capacity 1)",
@@ -755,6 +882,25 @@
   "48984": "Pod 2 (Capacity 4)",
   "48985": "Pod 3 (Capacity 4)",
   "53667": "VR Room 1 - PC 1 (Capacity 1)",
-  "53668": "VR Room 1 - PC 2 (Capacity 1)"
+  "53668": "VR Room 1 - PC 2 (Capacity 1)",
+  "7554": "SP1",
+  "7555": "SP2",
+  "7556": "SP3",
+  "7557": "SP4",
+  "7587": "WS01",
+  "7588": "WS02",
+  "7589": "WS03",
+  "7590": "WS04",
+  "7591": "WS05",
+  "7592": "WS06",
+  "7593": "WS07",
+  "7594": "WS08",
+  "7595": "WS09",
+  "7596": "WS10",
+  "7597": "CR1",
+  "7598": "CR2",
+  "7599": "CR3",
+  "7600": "CR4",
+  "7605": "CR5"
  }
 }

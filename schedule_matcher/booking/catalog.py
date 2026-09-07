@@ -128,6 +128,16 @@ def max_day_minutes(lid: int, gid: int) -> int | None:
     return int(value) if value else None
 
 
+def all_categories() -> list[dict]:
+    """Every category the catalogue knows, for the booking picker.
+
+    Each entry carries library, category, lid and gid. This is what lets a
+    machine that has never logged in still offer Griffin Booth, whose
+    homepage link names no ids.
+    """
+    return [e for e in _meta().values() if e.get("lid") and e.get("gid")]
+
+
 def spaces(lid: int, gid: int) -> dict[int, str]:
     """item id -> real name, so a scheduled booking can name a table even
     though that day's grid does not exist yet."""
@@ -194,6 +204,23 @@ async def refresh(user_id: int, username: str, password: str) -> dict:
 
     meta = _meta()
     locations = await libcal.fetch_locations(force=True)
+
+    # The homepage does not name every category - Griffin Booth is linked as
+    # /reserve/collab and the Humanities ones as /space/NNNNN, neither of
+    # which carries an lid or gid. Each library's own page does list them all.
+    for loc in locations:
+        lid = next((c.lid for c in loc.categories if c.lid), None)
+        if not lid:
+            continue
+        found = await asyncio.to_thread(browser.harvest_categories, user_id,
+                                        username, password, lid)
+        for gid, label in found.items():
+            if not any(c.lid == lid and c.gid == gid for c in loc.categories):
+                log.info("catalogue: %s adds %s (gid=%s)", loc.name, label, gid)
+                loc.categories.append(
+                    libcal.Category(label=label, lid=lid, gid=gid,
+                                    url=f"/spaces?lid={lid}&gid={gid}"))
+
     for loc in locations:
         for cat in loc.categories:
             if not cat.gid:
@@ -216,6 +243,8 @@ async def refresh(user_id: int, username: str, password: str) -> dict:
                 hours[str(day.weekday())] = [f"{min(starts):%H:%M}", f"{max(ends):%H:%M}"]
                 entry.setdefault("spaces", {}).update(
                     {str(i): libcal.room_name(i) for i in grid})
+                entry["grid_ids"] = sorted(set(entry.get("grid_ids") or [])
+                                           | set(grid))
             if hours:
                 merged = dict(entry.get("hours") or {})
                 merged.update(hours)
@@ -225,6 +254,19 @@ async def refresh(user_id: int, username: str, password: str) -> dict:
             if names:
                 libcal.remember_room_names(names)
                 entry["spaces"] = {str(k): v for k, v in names.items()}
+                # A category whose real spaces are none of the ids the public
+                # grid returned is booking seats, not rooms: the grid answers
+                # with the room itself unless the request asks for seats.
+                grid_ids = set(entry.get("grid_ids") or [])
+                if grid_ids and not (grid_ids & set(names)):
+                    entry["seats"] = True
+                    log.info("catalogue: %s books seats, not spaces", cat.label)
+            # The policy blurb is the only source for the notice period and
+            # the length caps, and it needs a login to read.
+            text = await asyncio.to_thread(browser.harvest_policy, user_id,
+                                           username, password, cat.lid, cat.gid)
+            if text:
+                entry.update(parse_policy(text))
             meta[key] = entry
     save(meta)
     return meta

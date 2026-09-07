@@ -275,3 +275,46 @@ For someone whose bookings were all made on the website, the honest answer is
 that the bot cannot enumerate them - so those commands now say so and point
 at the two things that do work: the check-in code, or pasting the
 confirmation email.
+
+
+---
+
+## Fixed 7 Sep: four categories were never offered at all
+
+`libcal.fetch_locations()` built the category list by reading `lid`/`gid` out
+of the homepage's links. Four categories are linked without ids and were
+silently discarded by the `lid == 0` guard:
+
+| Category | Library | Homepage link | Real ids |
+|---|---|---|---|
+| Griffin Booth | Lee Wee Nam | `/reserve/collab` | `3368 / 8423` |
+| Computer Room | Humanities | `/space/52771` | `4906 / 13378` |
+| Study Pod | Humanities | `/space/52888` | `4906 / 13402` |
+| Window Seat | Humanities | `/space/52772` | `4906 / 13380` |
+
+The Humanities library was therefore offered with nothing but an "All
+Categories" entry, which is a `gid=0` view with no grid of its own - so none
+of its four categories could be booked.
+
+The list now merges the homepage with the catalogue, which ships with the
+code, so a machine that has never logged in still sees all 25. `refresh()`
+reads each library's own category dropdown (`select#gid`), which is the
+authoritative list, and its Policy blurb, which is the only source for the
+notice period and the length caps - Griffin Booth turns out to be 1 day's
+notice, 2 hours each.
+
+**The Humanities categories book seats, not rooms.** Asking for their grid the
+ordinary way answers with a single item - the room itself, the `/space/NNNNN`
+the homepage links - and the real seats appear only when the request says
+`seat=1`:
+
+```
+Study Pod   default -> 1 space  [52888]
+Study Pod   seat=1  -> 4 spaces [7554, 7555, 7556, 7557]  (SP1-SP4)
+Window Seat seat=1  -> 10 spaces (WS01-WS10)
+```
+
+`refresh()` detects this by itself - a category whose real spaces are none of
+the ids the public grid returned is a seat category - and records `seats:
+true`, which `fetch_grid` then honours. Griffin Booth is an ordinary category
+(12 spaces) and needs none of it.

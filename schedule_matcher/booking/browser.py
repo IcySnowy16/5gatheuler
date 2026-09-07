@@ -185,6 +185,69 @@ def _harvest_room_names(page) -> dict[int, str]:
         return {}
 
 
+def harvest_categories(user_id: int, username: str, password: str,
+                       lid: int) -> dict[int, str]:
+    """The library's own category list, read off its page.
+
+    The homepage links some categories without ids in the URL - Griffin Booth
+    is /reserve/collab, the Humanities ones are /space/NNNNN - so scraping it
+    misses them entirely. This dropdown is the authoritative list.
+    """
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not config.HEADFUL, args=LAUNCH_ARGS)
+        state = _state_path(user_id)
+        context = browser.new_context(
+            storage_state=str(state) if state.exists() else None, user_agent=UA)
+        page = context.new_page()
+        try:
+            page.goto(f"{BASE}/spaces?lid={lid}", wait_until="domcontentloaded",
+                      timeout=45000)
+            _maybe_login(page, username, password)
+            page.wait_for_selector("select#gid", timeout=30000)
+            opts = page.eval_on_selector_all(
+                "select#gid option",
+                "els => els.map(e => [e.innerText.trim(), e.value])")
+            context.storage_state(path=str(state))
+            return {int(v): t for t, v in opts
+                    if v and v.isdigit() and int(v) > 0 and t}
+        except Exception:
+            log.exception("category list harvest failed for lid=%s", lid)
+            _dump(page, f"cats-{lid}")
+            return {}
+        finally:
+            context.close()
+            browser.close()
+
+
+def harvest_policy(user_id: int, username: str, password: str,
+                   lid: int, gid: int) -> str:
+    """The category's Policy blurb - notice period and length caps."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not config.HEADFUL, args=LAUNCH_ARGS)
+        state = _state_path(user_id)
+        context = browser.new_context(
+            storage_state=str(state) if state.exists() else None, user_agent=UA)
+        page = context.new_page()
+        try:
+            page.goto(f"{BASE}/spaces?lid={lid}&gid={gid}",
+                      wait_until="domcontentloaded", timeout=45000)
+            _maybe_login(page, username, password)
+            page.wait_for_timeout(1200)
+            text = re.sub(r"[ 	]+", " ", page.inner_text("body"))
+            context.storage_state(path=str(state))
+            return text
+        except Exception:
+            log.exception("policy read failed for lid=%s gid=%s", lid, gid)
+            return ""
+        finally:
+            context.close()
+            browser.close()
+
+
 def harvest_names(user_id: int, username: str, password: str,
                   lid: int, gid: int, on_date: datetime | None = None) -> dict[int, str]:
     """Log in, open the category page, and read the real space names
