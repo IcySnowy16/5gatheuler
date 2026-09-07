@@ -238,12 +238,25 @@ The bot only needs outbound HTTPS — no domain, no open ports.
 
 ```powershell
 python -m pyflakes schedule_matcher/*.py schedule_matcher/booking/*.py
-python tests/smoke_handlers.py     # drives all 74 commands + callbacks
+python tests/smoke_handlers.py     # every command and callback, does it raise?
+python tests/schedule_flows.py     # is the scheduling half's answer correct?
+python tests/webapp_page.py        # drives the grid in a real browser
 ```
 
 `tests/smoke_handlers.py` calls every command and callback branch with mock
 Telegram objects and reports any that raise. It exists because a handler once
 failed silently for want of an argument; run it before every push.
+
+`tests/schedule_flows.py` goes further for the scheduling half: it checks the
+*answers*, not just the absence of a crash — that a painted grid comes back as
+the times painted, that `/best` finds the overlap you can work out on paper,
+that one person's answer cannot disturb another's, and that an empty answer, a
+whole day, a stale grid and an outsider all do the right thing. No network, no
+browser, about a second.
+
+`tests/webapp_page.py` opens `docs/index.html` in headless Chromium and drags
+a finger down the grid, then decodes what the page would send — in Python — to
+prove the two implementations of the bitmask have not drifted apart.
 
 **Branching.** `main` stays working. Anything that fixes a bug or adds a
 feature gets its own branch and a pull request:
