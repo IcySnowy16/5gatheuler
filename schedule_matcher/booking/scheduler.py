@@ -10,15 +10,82 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 
 from .. import config, storage, tasks
-from . import browser, holds, libcal
+from . import browser, catalog, holds, libcal
 from . import handlers as h
 
 log = logging.getLogger(__name__)
 
 FMT = storage.FMT
+
+
+async def _materialise_recurring(application) -> None:
+    """Turn each rule's next occurrences into ordinary scheduled jobs.
+
+    Everything downstream - racing the 23:59 window, pre-holding, retrying,
+    reporting, checking in - then works on a recurring booking without
+    knowing that recurrence exists.
+
+    Only occurrences whose window opens within RECUR_LOOKAHEAD_HOURS are
+    created. That is not tidiness: _prehold_scan below fetches a grid for
+    every pending job on every tick, so a term's worth of jobs created up
+    front would hammer the library for weeks.
+    """
+    today = date.today()
+    now = datetime.now()
+    horizon = now + timedelta(hours=config.RECUR_LOOKAHEAD_HOURS)
+    for rule in storage.active_rules():
+        try:
+            until = date.fromisoformat(rule["until_date"])
+        except ValueError:
+            log.warning("rule #%s has a bad end date: %r",
+                        rule["id"], rule["until_date"])
+            continue
+        if until < today:
+            storage.update_rule(rule["id"], status="finished")
+            await _tell(application, rule["user_id"],
+                        f"Your repeating booking for {rule['category']} has "
+                        f"reached its end date ({until:%d %b}) and has stopped. "
+                        "/recurring sets up another.")
+            continue
+        weekdays = storage.rule_weekdays(rule)
+        if not weekdays:
+            continue
+        day = today
+        while day <= until:
+            if day.weekday() not in weekdays:
+                day += timedelta(days=1)
+                continue
+            fire = catalog.window_opens_at(rule["lid"], rule["gid"], day)
+            if fire > horizon:
+                break                      # later days open later still
+            if not catalog.is_open(rule["lid"], rule["gid"], day):
+                day += timedelta(days=1)
+                continue                   # Sunday, or a closure
+            start = datetime.combine(day, dtime.fromisoformat(rule["start_hm"]))
+            end = datetime.combine(day, dtime.fromisoformat(rule["end_hm"]))
+            if end > now and not storage.rule_job_exists(rule["id"], start):
+                job_id = storage.add_scheduled(
+                    rule["user_id"], rule["lid"], rule["gid"], rule["location"],
+                    rule["category"], rule["item_id"], start, end, fire,
+                    fire + timedelta(minutes=config.SCHED_RETRY_MINUTES),
+                    rule_id=rule["id"])
+                log.info("rule #%s -> scheduled job #%s for %s",
+                         rule["id"], job_id, start)
+                await _tell(application, rule["user_id"],
+                            f"Repeating booking: {rule['category']} on "
+                            f"{start:%a %d %b} {start:%H:%M}-{end:%H:%M} is set "
+                            f"up. I try at {fire:%a %d %b %H:%M}.")
+            day += timedelta(days=1)
+
+
+async def _tell(application, user_id: int, text: str) -> None:
+    try:
+        await application.bot.send_message(user_id, text)
+    except Exception:
+        log.debug("could not DM %s", user_id, exc_info=True)
 
 
 async def run(application) -> None:
@@ -38,6 +105,12 @@ async def run(application) -> None:
         log.exception("startup proof cleanup failed")
     log.info("Scheduled-booking runner started")
     while True:
+        # Rules first: an occurrence that is already due then fires on this
+        # same tick, and _tick_seconds() below can see it and speed up.
+        try:
+            await _materialise_recurring(application)
+        except Exception:
+            log.exception("recurring materialise failed")
         try:
             for job in storage.due_scheduled():
                 storage.update_scheduled(job["id"], status="running")

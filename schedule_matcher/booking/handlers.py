@@ -37,20 +37,22 @@ MODE_TITLES = {
     "chope": "Chope (hold) a space without booking it",
     "ext": "Extended session - book the first leg, chope the rest",
     "sched": "Schedule a booking for when its window opens",
+    "recur": "Repeat a booking every week",
 }
 
 # The flow is one thing in four modes; the row of buttons at the top of every
 # screen switches between them without starting over.
-MODE_ORDER = ["now", "sched", "ext", "chope"]
+MODE_ORDER = ["now", "sched", "ext", "recur", "chope"]
 MODE_SHORT = {"now": "Book", "chope": "Chope", "sched": "Schedule",
-              "ext": "Extended"}
+              "ext": "Extended", "recur": "Repeat"}
 
 
-def _mode_row(bk, user_id: int | None = None) -> list[InlineKeyboardButton]:
-    """Book / Schedule / Extended - plus Chope for developers only.
+def _mode_rows(bk, user_id: int | None = None) -> list[list[InlineKeyboardButton]]:
+    """Book / Schedule / Extended / Repeat - plus Chope for developers only.
 
     Extended holds the later legs by itself, so choping is not something an
-    ordinary user ever needs to ask for.
+    ordinary user ever needs to ask for. Four buttons is too many for one row
+    on a phone, so past three they wrap into pairs.
     """
     row = []
     for mode in MODE_ORDER:
@@ -60,7 +62,9 @@ def _mode_row(bk, user_id: int | None = None) -> list[InlineKeyboardButton]:
         row.append(InlineKeyboardButton(
             f"\u2022 {label} \u2022" if mode == bk.get("mode") else label,
             callback_data=f"bk|mode|{mode}"))
-    return row
+    if len(row) <= 3:
+        return [row]
+    return [row[i:i + 2] for i in range(0, len(row), 2)]
 
 
 def _switch_mode(bk, mode: str) -> str:
@@ -96,9 +100,12 @@ def _prev_step(bk: dict, step: str) -> str:
         return "end" if bk.get("via_custom") else "range"
     if step == "confirm":
         return "range" if bk.get("only_item") else "space"
+    if step == "dur" and bk.get("mode") == "recur":
+        return "days"
     return {"cat": "home", "day": "cat", "dur": "day", "range": "dur",
             "start": "dur", "end": "start", "fire": "space",
-            "sconfirm": "fire"}.get(step, "home")
+            "sconfirm": "fire", "days": "cat", "until": "space",
+            "rconfirm": "until"}.get(step, "home")
 
 
 # --- Small helpers --------------------------------------------------------
@@ -133,7 +140,7 @@ def _kb(items: list[tuple[str, str]], per_row: int = 2, nav: bool = True,
     """items -> buttons, with the mode switcher on top and Back/Menu below."""
     rows = []
     if bk is not None:
-        rows.append(_mode_row(bk, bk.get("user_id")))
+        rows.extend(_mode_rows(bk, bk.get("user_id")))
     row = []
     for label, data in items:
         row.append(InlineKeyboardButton(label, callback_data=data))
@@ -349,7 +356,8 @@ async def _render(query, context, step: str):
     await {"home": _r_home, "cat": _r_cat, "day": _r_day, "dur": _r_dur,
            "range": _r_range, "start": _r_start, "end": _r_end,
            "space": _r_space, "fire": _r_fire, "confirm": _r_confirm,
-           "sconfirm": _r_sconfirm}[step](query, context, bk)
+           "sconfirm": _r_sconfirm, "days": _r_days, "until": _r_until,
+           "rconfirm": _r_rconfirm}[step](query, context, bk)
 
 
 async def _r_home(query, context, bk):
@@ -888,6 +896,116 @@ def _ext_legs(bk) -> list[tuple[datetime, datetime]]:
     return legs
 
 
+WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _rule_days_text(weekdays) -> str:
+    days = [WEEKDAY_NAMES[d] for d in sorted(weekdays)]
+    if len(days) == 1:
+        return days[0]
+    return " & ".join([", ".join(days[:-1]), days[-1]])
+
+
+def _occurrences(lid: int, gid: int, weekdays, until, start: dtime | None = None,
+                 limit: int | None = None) -> list[date]:
+    """Every day this rule would book.
+
+    Days the library is shut are skipped, and so is today once the session's
+    own start time has gone by - counting a slot that already began would
+    promise a booking the scheduler is right to refuse.
+    """
+    out = []
+    now = datetime.now()
+    day = date.today()
+    while day <= until:
+        if day.weekday() in weekdays and catalog.is_open(lid, gid, day):
+            if start is None or datetime.combine(day, start) > now:
+                out.append(day)
+                if limit and len(out) >= limit:
+                    break
+        day += timedelta(days=1)
+    return out
+
+
+async def _r_days(query, context, bk):
+    """Which weekdays - the recurring answer to 'which day'."""
+    cat = bk["locations"][bk["loc"]].categories[bk["cat"]]
+    chosen = set(bk.get("weekdays") or [])
+    items = []
+    for n, name in enumerate(WEEKDAY_NAMES):
+        if not catalog.is_open(cat.lid, cat.gid, _next_weekday(n)):
+            continue                       # Sunday: never offered
+        items.append((f"• {name} •" if n in chosen else name, f"bk|wd|{n}"))
+    rows = list(items)
+    if chosen:
+        rows.append((f"Done - {_rule_days_text(chosen)}", "bk|wdone"))
+    await query.edit_message_text(
+        f"{cat.label} - which days, every week?\n"
+        "(Tap each day you want, then Done. Sundays are not offered - the "
+        "library is closed.)",
+        reply_markup=_kb(rows, per_row=4, bk=bk))
+
+
+def _after_space(bk) -> str:
+    """Where the flow goes once a space is chosen."""
+    return {"sched": "fire", "recur": "until"}.get(bk["mode"], "confirm")
+
+
+def _next_weekday(n: int) -> date:
+    """The next date falling on weekday n, for opening-hours questions."""
+    today = date.today()
+    return today + timedelta(days=(n - today.weekday()) % 7)
+
+
+async def _r_until(query, context, bk):
+    """How long to keep repeating."""
+    cat = bk["locations"][bk["loc"]].categories[bk["cat"]]
+    today = date.today()
+    presets = [(4, "4 weeks"), (8, "8 weeks"), (13, "13 weeks - a semester")]
+    items = [(f"{label} (until {today + timedelta(weeks=w):%d %b})",
+              f"bk|until|{w}") for w, label in presets]
+    items.append(("Custom - I'll type the date", "bk|until|custom"))
+    await query.edit_message_text(
+        f"{cat.label}, {_rule_days_text(bk['weekdays'])} "
+        f"{bk['start']:%H:%M}-{bk['end']:%H:%M}\n\n"
+        "Until when should I keep booking this?\n"
+        f"(You can stop it any time with /recurring. Longest is "
+        f"{config.RECUR_MAX_WEEKS} weeks.)",
+        reply_markup=_kb(items, per_row=1, bk=bk))
+
+
+async def _r_rconfirm(query, context, bk):
+    """The last screen: exactly what will be booked, and when I will try."""
+    loc = bk["locations"][bk["loc"]]
+    cat = loc.categories[bk["cat"]]
+    until = bk["until"]
+    days = _occurrences(cat.lid, cat.gid, bk["weekdays"], until,
+                        bk["start"].time())
+    preview = []
+    for day in days[:3]:
+        fire = catalog.window_opens_at(cat.lid, cat.gid, day)
+        preview.append(f"  {day:%a %d %b}   I try at {fire:%a %d %b %H:%M}")
+    warn = rules.precheck(query.from_user.id, bk.get("room"),
+                          datetime.combine(days[0], bk["start"].time()),
+                          datetime.combine(days[0], bk["end"].time())) if days else []
+    await query.edit_message_text(
+        f"Repeat this booking?\n\n"
+        f"{loc.name} - {cat.label}\n"
+        f"{_chosen_space_text(bk)}\n"
+        f"{_rule_days_text(bk['weekdays'])}, "
+        f"{bk['start']:%H:%M} - {bk['end']:%H:%M}\n"
+        f"Until {until:%a %d %b} ({len(days)} bookings)\n\n"
+        + ("First three:\n" + "\n".join(preview) + "\n\n" if preview else "")
+        + ("⚠ " + "\n⚠ ".join(warn) + "\n\n" if warn else "")
+        + "I set each one up as its booking window comes near, then race for "
+        "it like any scheduled booking. You get a message either way, and "
+        "/recurring stops the lot.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Repeat it", callback_data="bk|go")],
+            _nav_row(),
+        ]))
+
+
 async def _r_sconfirm(query, context, bk):
     loc = bk["locations"][bk["loc"]]
     cat = loc.categories[bk["cat"]]
@@ -915,6 +1033,28 @@ async def _bk_go(query, context, user_id: int):
     loc = bk["locations"][bk["loc"]]
     cat = loc.categories[bk["cat"]]
     context.user_data["bk_last"] = {"category": cat.label, "loc": bk["loc"], "cat": bk["cat"]}
+
+    if bk["mode"] == "recur":
+        mine = storage.list_rules(user_id)
+        if len(mine) >= config.MAX_RULES:
+            await query.edit_message_text(
+                f"You already have {len(mine)} repeating bookings, which is "
+                f"the limit ({config.MAX_RULES}). /recurring deletes one.")
+            return
+        rule_id = storage.add_rule(
+            user_id, cat.lid, cat.gid, loc.name, cat.label, bk.get("room"),
+            bk["weekdays"], f"{bk['start']:%H:%M}", f"{bk['end']:%H:%M}",
+            bk["until"])
+        days = _occurrences(cat.lid, cat.gid, bk["weekdays"], bk["until"],
+                            bk["start"].time())
+        flows.finish(context, flows.LIBRARY)
+        await query.edit_message_text(
+            f"Repeating (#{rule_id}): {_rule_days_text(bk['weekdays'])} "
+            f"{bk['start']:%H:%M}-{bk['end']:%H:%M}, {len(days)} bookings up to "
+            f"{bk['until']:%d %b}.\n\n"
+            "I set each one up as its window comes near and tell you how it "
+            "went. /recurring stops it, /scheduled shows what is queued.")
+        return
 
     if bk["mode"] == "sched":
         fire = bk["fire_at"]
@@ -2225,6 +2365,80 @@ async def _cancel_link_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return True
 
 
+async def _until_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """'Until when?' typed rather than tapped."""
+    if not context.user_data.get("awaiting_until_date"):
+        return False
+    bk = context.user_data.get("bk") or {}
+    if "weekdays" not in bk:
+        context.user_data.pop("awaiting_until_date", None)
+        return False
+    text = update.effective_message.text.strip()
+    until = None
+    for fmt in ("%d/%m/%Y", "%d/%m", "%d %b %Y", "%d %b"):
+        try:
+            parsed = datetime.strptime(text, fmt).date()
+            until = (parsed if "%Y" in fmt
+                     else parsed.replace(year=date.today().year))
+            break
+        except ValueError:
+            continue
+    if until is None:
+        await update.effective_message.reply_text(
+            "Couldn't read that - send the last date as DD/MM, e.g. 12/12.")
+        return True
+    today = date.today()
+    if until <= today:
+        # A date already past is almost always next year's, typed short.
+        until = until.replace(year=today.year + 1)
+    longest = today + timedelta(weeks=config.RECUR_MAX_WEEKS)
+    if until > longest:
+        until = longest
+        await update.effective_message.reply_text(
+            f"That is further ahead than I keep rules for, so I've set the end "
+            f"to {until:%d %b} ({config.RECUR_MAX_WEEKS} weeks). /recurring can "
+            "extend it later.")
+    context.user_data.pop("awaiting_until_date", None)
+    bk["until"] = until
+    msg = await update.effective_message.reply_text("...")
+    await _render(_msg_query(update.effective_user, msg), context, "rconfirm")
+    return True
+
+
+def _rule_line(rule) -> str:
+    """One rule, in a sentence."""
+    days = _rule_days_text(storage.rule_weekdays(rule))
+    until = date.fromisoformat(rule["until_date"])
+    paused = " (paused)" if rule["status"] == "paused" else ""
+    where = _space_label(rule["item_id"]) if rule["item_id"] else "any space"
+    return (f"{days} {rule['start_hm']}-{rule['end_hm']} {rule['category']}, "
+            f"{where}, until {until:%d %b}{paused}")
+
+
+async def cmd_recurring(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The repeating bookings you have, and the buttons to stop them."""
+    if not await _require_private(update):
+        return
+    rules_ = storage.list_rules(update.effective_user.id)
+    kb = []
+    for r in rules_:
+        resume = r["status"] == "paused"
+        kb.append([
+            InlineKeyboardButton(("▶" if resume else "⏸") + f" {_rule_line(r)}",
+                                 callback_data=f"bk|rpause|{r['id']}"),
+            InlineKeyboardButton("✕", callback_data=f"bk|rdel|{r['id']}"),
+        ])
+    kb.append([InlineKeyboardButton("➕ New repeating booking",
+                                    callback_data="bk|rnew")])
+    await flows.start(
+        update, context, flows.LIBRARY,
+        ("Repeating bookings - tap one to pause or resume it, ✕ deletes:"
+         if rules_ else
+         "No repeating bookings yet. I book the same slot every week and race "
+         "for it the moment each week's window opens."),
+        reply_markup=InlineKeyboardMarkup(kb))
+
+
 async def _fire_time_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not context.user_data.get("awaiting_fire_time"):
         return False
@@ -2318,8 +2532,8 @@ async def _pasted_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for handler in (_setup_input, _fire_time_input, _cancel_link_input,
-                    _pasted_email_input):
+    for handler in (_setup_input, _fire_time_input, _until_date_input,
+                    _cancel_link_input, _pasted_email_input):
         if await handler(update, context):
             return
 
@@ -2335,6 +2549,32 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     bk = context.user_data.get("bk")
 
     try:
+        if action == "rnew":
+            await _start_flow(update, context, "recur")
+            return
+        if action in ("rpause", "rdel"):
+            rule = storage.get_rule(int(parts[2]))
+            if rule is None or rule["user_id"] != query.from_user.id:
+                await query.edit_message_text(
+                    "That repeating booking is gone already.")
+                return
+            if action == "rdel":
+                storage.update_rule(rule["id"], status="cancelled")
+                await query.edit_message_text(
+                    f"Stopped: {_rule_line(rule)}\n\n"
+                    "Bookings it already made stay - /bookings shows them, "
+                    "/scheduled cancels any that have not run yet.")
+                return
+            pausing = rule["status"] == "active"
+            storage.update_rule(rule["id"],
+                                status="paused" if pausing else "active")
+            await query.edit_message_text(
+                ("Paused" if pausing else "Running again")
+                + f": {_rule_line(rule)}"
+                + ("\n\nI will not set up any more weeks until you resume it."
+                   if pausing else ""))
+            return
+
         if action == "scancel":
             storage.update_scheduled(int(parts[2]), status="cancelled")
             await query.edit_message_text(f"Scheduled booking #{parts[2]} cancelled.")
@@ -2472,7 +2712,8 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             await _render(query, context, "cat")
         elif action == "cat":
             bk["cat"] = int(parts[2])
-            await _render(query, context, "day")
+            await _render(query, context,
+                          "days" if bk["mode"] == "recur" else "day")
         elif action == "again":
             last = context.user_data.get("bk_last")
             if not last or last.get("loc") is None:
@@ -2524,7 +2765,7 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         elif action == "sp":
             bk.pop("plan", None)          # a named desk, not a hop plan
             bk["room"] = int(parts[2])
-            await _render(query, context, "fire" if bk["mode"] == "sched" else "confirm")
+            await _render(query, context, _after_space(bk))
         elif action == "hop":
             if not bk.get("plan"):
                 await query.edit_message_text("That plan expired - pick the time again.")
@@ -2537,7 +2778,7 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await _render(query, context, "confirm")
             else:
                 bk["room"] = None
-                await _render(query, context, "fire")
+                await _render(query, context, _after_space(bk))
         elif action == "fine":
             bk["fine"] = not bk.get("fine")
             await _render(query, context, bk.get("step", "range"))
@@ -2560,6 +2801,31 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                     t = datetime.strptime(parts[2], "%H%M").time()
                     bk["fire_at"] = datetime.combine(bk["day"], t)
                 await _render(query, context, "sconfirm")
+        elif action == "wd":
+            chosen = set(bk.get("weekdays") or [])
+            chosen ^= {int(parts[2])}          # tap to add, tap again to drop
+            bk["weekdays"] = sorted(chosen)
+            await _render(query, context, "days")
+        elif action == "wdone":
+            if not bk.get("weekdays"):
+                await query.answer("Pick at least one day first.", show_alert=True)
+                return
+            # The rest of the flow asks about one day's times and spaces, so
+            # give it the first day this rule will actually book.
+            cat_ = bk["locations"][bk["loc"]].categories[bk["cat"]]
+            days = _occurrences(cat_.lid, cat_.gid, bk["weekdays"],
+                                date.today() + timedelta(days=14), limit=1)
+            bk["day"] = days[0] if days else date.today()
+            await _render(query, context, "dur")
+        elif action == "until":
+            if parts[2] == "custom":
+                context.user_data["awaiting_until_date"] = True
+                await query.edit_message_text(
+                    "Type the last date to book: DD/MM, or DD/MM/YYYY.")
+            else:
+                weeks = min(int(parts[2]), config.RECUR_MAX_WEEKS)
+                bk["until"] = date.today() + timedelta(weeks=weeks)
+                await _render(query, context, "rconfirm")
         elif action == "favu":
             await _render(query, context, "confirm")
         elif action == "favt":
@@ -2597,6 +2863,7 @@ def register(application) -> None:
     application.add_handler(CommandHandler("holds", cmd_holds))
     application.add_handler(CommandHandler("holdtime", cmd_holdtime))
     application.add_handler(CommandHandler("scheduled", cmd_scheduled))
+    application.add_handler(CommandHandler("recurring", cmd_recurring))
     application.add_handler(CommandHandler("botemail", cmd_botemail))
     application.add_handler(CommandHandler("code", cmd_code))
     application.add_handler(CommandHandler("email", cmd_email))

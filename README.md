@@ -7,6 +7,11 @@ A Telegram bot that is really two tools sharing one process:
 [libcalendar.ntu.edu.sg](https://libcalendar.ntu.edu.sg/), check in, and get
 out again.
 
+All 25 categories in six libraries are offered, including the four the
+homepage links without ids - Griffin Booth, and the Humanities library's
+Computer Room, Study Pod and Window Seat, which book individual seats rather
+than whole rooms.
+
 Everything the bot knows about the library was measured from the site rather
 than assumed — opening hours, how much notice each category needs, how long a
 "chope" lasts, and the fact that day-of windows open at **23:59:00** exactly.
@@ -153,6 +158,10 @@ Send `/menu` — everything is buttons; nothing has to be typed.
   times, code and cancellation link and files the booking for you.
 - `/cancelbooking` — cancel *is* check-out on this site; works until the
   booking ends. `/move` books the new slot first, then releases the old one.
+- **Repeat weekly.** Pick the weekdays and an end date once and the bot books
+  that slot every week - one race per occurrence, set up as each week's window
+  comes near, never a term's worth of requests at once. `/recurring` lists
+  them with pause and delete.
 - `/fav`, `/bookings`, `/scheduled`, `/availability`, `/rules`, `/mostused`.
 
 **Schedule Matcher**

@@ -8,7 +8,6 @@ import asyncio
 import os
 import sys
 import tempfile
-import traceback
 from datetime import datetime, timedelta
 
 os.environ["SCHEDULE_MATCHER_HOME"] = tempfile.mkdtemp()
@@ -42,6 +41,8 @@ storage.add_slot(-100, "ABC123", UID, "Zilu", now + timedelta(days=1),
 JOB = storage.add_scheduled(UID, 3368, 11822, "LWN", "Arrakis", None,
                             now + timedelta(days=1), now + timedelta(days=1, hours=2),
                             now + timedelta(hours=5), now + timedelta(hours=6))
+RULE = storage.add_rule(UID, 3368, 11822, "LWN", "Arrakis", None, [0, 2],
+                        "13:30", "15:30", (now + timedelta(days=21)).date())
 HOLDROW = storage.add_hold(UID, 3368, 11822, 46002, "LWN", "Arrakis",
                            "LIBLWNL-AK-01 (Capacity 1)", now + timedelta(hours=1),
                            now + timedelta(hours=3))
@@ -157,6 +158,7 @@ async def main():
         "fav": (bh.cmd_fav, []), "move": (bh.cmd_move, []),
         "cancelbooking": (bh.cmd_cancel_booking, []),
         "scheduled": (bh.cmd_scheduled, []), "holds": (bh.cmd_holds, []),
+        "recurring": (bh.cmd_recurring, []),
         "holdtime": (bh.cmd_holdtime, []), "holdtime 120": (bh.cmd_holdtime, ["120"]),
         "mostused": (bh.cmd_mostused, []), "mostused 5": (bh.cmd_mostused, ["5"]),
         "rules": (bh.cmd_rules, []), "developer": (bh.cmd_developer, []),
@@ -180,7 +182,8 @@ async def main():
         f"bk|favadd|{BOOKING}", f"bk|fav|{FAV}", f"bk|favdel|{FAV}",
         "bk|fadd", "bk|mu|5", "bk|ht|ask", "bk|ht|120", "bk|hallback",
         f"bk|hagain|{HOLDROW}", "bk|hbook|999", "bk|hrel|999", "bk|hext|999",
-        f"bk|scancel|{JOB}", f"bk|setcode|{BOOKING}", "bk|back", "bk|home",
+        f"bk|scancel|{JOB}", f"bk|rpause|{RULE}", f"bk|rdel|{RULE}",
+        "bk|rpause|99999", f"bk|setcode|{BOOKING}", "bk|back", "bk|home",
         "bk|abort", "view|ABC123", "best|ABC123", "bestdur|ABC123|60",
         "evt|ABC123", "del_evt|ABC123", "ignore", "ask|default",
     ]

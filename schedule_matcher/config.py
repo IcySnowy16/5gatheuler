@@ -84,6 +84,13 @@ EMAIL_POLL_MINUTES = int(os.getenv("EMAIL_POLL_MINUTES", "10"))
 # Scheduled bookings: how long to keep retrying after the fire time when the
 # booking window hasn't opened yet, and the gap between attempts.
 SCHED_RETRY_MINUTES = int(os.getenv("SCHED_RETRY_MINUTES", "30"))
+# Recurring bookings. Each occurrence becomes an ordinary scheduled job, but
+# only as its window comes near: the pre-hold pass fetches a grid for every
+# pending job on every tick, so materialising a whole term at once would mean
+# dozens of requests a minute against the library for weeks on end.
+RECUR_LOOKAHEAD_HOURS = int(os.getenv("RECUR_LOOKAHEAD_HOURS", "26"))
+MAX_RULES = int(os.getenv("MAX_RULES", "3"))
+RECUR_MAX_WEEKS = int(os.getenv("RECUR_MAX_WEEKS", "26"))
 SCHED_RETRY_GAP_SECONDS = int(os.getenv("SCHED_RETRY_GAP_SECONDS", "120"))
 
 # Measured: the day-of window opens at 23:59:00 exactly, and contested desks

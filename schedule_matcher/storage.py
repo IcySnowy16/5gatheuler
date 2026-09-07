@@ -14,7 +14,7 @@ import logging
 import pickle
 import sqlite3
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import config
@@ -118,6 +118,21 @@ CREATE TABLE IF NOT EXISTS templates (
     tier     INTEGER DEFAULT 0,
     PRIMARY KEY (user_id, weekday, start_hm, end_hm)
 );
+CREATE TABLE IF NOT EXISTS recurring_rules (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    lid        INTEGER NOT NULL,
+    gid        INTEGER NOT NULL,
+    location   TEXT,
+    category   TEXT,
+    item_id    INTEGER,
+    weekdays   TEXT NOT NULL,
+    start_hm   TEXT NOT NULL,
+    end_hm     TEXT NOT NULL,
+    until_date TEXT NOT NULL,
+    status     TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
 CREATE TABLE IF NOT EXISTS developers (
     user_id  INTEGER PRIMARY KEY,
     added_by INTEGER,
@@ -175,6 +190,7 @@ _MIGRATIONS = (
     "ALTER TABLE bookings ADD COLUMN proof_chat_id INTEGER",
     "ALTER TABLE bookings ADD COLUMN proof_msg_id INTEGER",
     "ALTER TABLE scheduled_bookings ADD COLUMN hold_id INTEGER",
+    "ALTER TABLE scheduled_bookings ADD COLUMN rule_id INTEGER",
 )
 
 FMT = "%Y-%m-%d %H:%M"
@@ -577,17 +593,92 @@ def update_leg(leg_id: int, **fields) -> None:
     c.commit()
 
 
+# --- Recurring rules ------------------------------------------------------
+#
+# A rule is the intention ("Mon and Wed, 13:30-15:30, Arrakis, until 12 Dec").
+# It never books anything itself: the scheduler turns each occurrence into an
+# ordinary scheduled_bookings row as its booking window comes near, so racing,
+# pre-holding, retrying and reporting all work unchanged.
+
+def add_rule(user_id: int, lid: int, gid: int, location: str, category: str,
+             item_id: int | None, weekdays: list[int], start_hm: str,
+             end_hm: str, until: date) -> int:
+    c = conn()
+    cur = c.execute(
+        "INSERT INTO recurring_rules (user_id, lid, gid, location, category,"
+        " item_id, weekdays, start_hm, end_hm, until_date)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (user_id, lid, gid, location, category, item_id,
+         ",".join(str(d) for d in sorted(weekdays)), start_hm, end_hm,
+         until.isoformat()),
+    )
+    c.commit()
+    return cur.lastrowid
+
+
+def get_rule(rule_id: int) -> sqlite3.Row | None:
+    return conn().execute("SELECT * FROM recurring_rules WHERE id=?",
+                          (rule_id,)).fetchone()
+
+
+def list_rules(user_id: int) -> list[sqlite3.Row]:
+    """Everything the owner should see - running and paused alike."""
+    return conn().execute(
+        "SELECT * FROM recurring_rules WHERE user_id=? AND status IN"
+        " ('active','paused') ORDER BY id", (user_id,)).fetchall()
+
+
+def active_rules() -> list[sqlite3.Row]:
+    """Rules the scheduler should be materialising right now."""
+    return conn().execute(
+        "SELECT * FROM recurring_rules WHERE status='active'"
+        " ORDER BY user_id, id").fetchall()
+
+
+def update_rule(rule_id: int, **fields) -> None:
+    c = conn()
+    sets = ", ".join(f"{k}=?" for k in fields)
+    c.execute(f"UPDATE recurring_rules SET {sets} WHERE id=?",
+              (*fields.values(), rule_id))
+    c.commit()
+
+
+def rule_weekdays(row: sqlite3.Row) -> list[int]:
+    return [int(d) for d in (row["weekdays"] or "").split(",") if d != ""]
+
+
+def rule_job_exists(rule_id: int, start: datetime) -> bool:
+    """Has this occurrence already been turned into a job?
+
+    Includes cancelled and failed rows deliberately: a week the user called
+    off, or one the site refused, must not be silently retried on the next
+    tick.
+    """
+    return conn().execute(
+        "SELECT 1 FROM scheduled_bookings WHERE rule_id=? AND start_ts=? LIMIT 1",
+        (rule_id, start.strftime(FMT))).fetchone() is not None
+
+
+def rule_jobs(rule_id: int, limit: int = 5) -> list[sqlite3.Row]:
+    return conn().execute(
+        "SELECT * FROM scheduled_bookings WHERE rule_id=? ORDER BY start_ts DESC"
+        " LIMIT ?", (rule_id, limit)).fetchall()
+
+
 # --- Scheduled bookings ---------------------------------------------------
 
 def add_scheduled(user_id: int, lid: int, gid: int, location: str, category: str,
                   item_id: int | None, start: datetime, end: datetime,
-                  fire_at: datetime, retry_until: datetime) -> int:
+                  fire_at: datetime, retry_until: datetime,
+                  rule_id: int | None = None) -> int:
     c = conn()
     cur = c.execute(
         "INSERT INTO scheduled_bookings (user_id, lid, gid, location, category, item_id,"
-        " start_ts, end_ts, fire_at, retry_until) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        " start_ts, end_ts, fire_at, retry_until, rule_id)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (user_id, lid, gid, location, category, item_id, start.strftime(FMT),
-         end.strftime(FMT), fire_at.strftime(FMT), retry_until.strftime(FMT)),
+         end.strftime(FMT), fire_at.strftime(FMT), retry_until.strftime(FMT),
+         rule_id),
     )
     c.commit()
     return cur.lastrowid

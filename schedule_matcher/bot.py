@@ -50,6 +50,7 @@ LIBRARY_MENU = {
     "lb_advanced": ("🧩 Advanced", [
         ("Split a long session with friends", "/groupbook"),
         ("Extended session (books, then holds)", "/extendedbooking"),
+        ("Repeat a booking every week", "/recurring"),
     ]),
     "lb_view": ("👀 View", [
         ("My bookings", "/bookings"),
@@ -124,7 +125,7 @@ HELP = (
     "  Edit: /edit changes your times, /delete removes them\n\n"
     "📚 LIBRARY BOOKING - reserve an NTU library space (private chat)\n"
     "  Book: /book, /fav, /checkin (also stores your check-in code)\n"
-    "  Advanced: /groupbook, /extendedbooking\n"
+    "  Advanced: /groupbook, /extendedbooking, /recurring\n"
     "  View: /bookings, /scheduled, /availability\n"
     "  Edit: /cancelbooking, /move\n"
     "  Settings: /setup, /botemail, /rules, /mostused, /forgetme\n\n"
@@ -691,6 +692,7 @@ def _menu_actions():
     return {
         "book": bh.cmd_book, "fav": bh.cmd_fav, "bookings": bh.cmd_bookings,
         "holds": bh.cmd_holds, "scheduled": bh.cmd_scheduled,
+        "recurring": bh.cmd_recurring,
         "checkin": bh.cmd_checkin, "code": bh.cmd_code,
         "cancelbooking": bh.cmd_cancel_booking, "move": bh.cmd_move,
         "setup": bh.cmd_setup, "email": bh.cmd_email,
