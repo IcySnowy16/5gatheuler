@@ -224,31 +224,103 @@ def _parse_deep_link(payload: str) -> tuple[int, str] | None:
         return None
 
 
-async def _open_grid(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                     chat_id: int, code: str) -> bool:
-    """Offer the painting grid in a private chat. False if it cannot be."""
+TAP_THROUGH = "Tap through a calendar"
+
+
+def _grid_offer(chat_id: int, code: str, user_id: int):
+    """The two ways to answer an event, or None when neither is possible.
+
+    The grid has to be a reply-keyboard button - Telegram only accepts a Mini
+    App's answer from one - so the calendar sits beside it in the same
+    keyboard rather than as an inline button, and nobody has to leave Telegram
+    to add their times.
+    """
     from telegram import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 
-    if update.effective_chat.type != "private":
-        return False
     event = storage.get_event(chat_id, code)
     if not event:
-        return False
+        return None
     days = storage.event_days(event)
     url = webapp.url_for(chat_id, event, days,
-                         storage.user_slots(chat_id, code, update.effective_user.id),
+                         storage.user_slots(chat_id, code, user_id),
                          storage.availabilities(chat_id, code))
-    if not url:
+    rows = []
+    if url:
+        rows.append([KeyboardButton("Open the grid",
+                                    web_app=WebAppInfo(url=url))])
+    rows.append([KeyboardButton(TAP_THROUGH)])
+    how = ("Drag down the strip to paint when you are free, or tap through a "
+           "calendar instead - whichever suits you." if url
+           else "Tap through a calendar to add your times.")
+    text = (f"'{event['name']}' - {days[0]:%a %d %b} to {days[-1]:%a %d %b}.\n\n"
+            f"{how} Either way, what you send replaces your previous answer."
+            + _slots_summary(chat_id, code, user_id))
+    return text, ReplyKeyboardMarkup(rows, resize_keyboard=True,
+                                     one_time_keyboard=True)
+
+
+async def _open_grid(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                     chat_id: int, code: str) -> bool:
+    """Offer both ways in a private chat. False if this is not one."""
+    if update.effective_chat.type != "private":
         return False
-    await update.effective_message.reply_text(
-        f"'{event['name']}' - {days[0]:%a %d %b} to {days[-1]:%a %d %b}.\n\n"
-        "Tap the button under the message box, then drag down the strip to "
-        "paint when you are free. Drag over a painted time again to rub it "
-        "out. What you send replaces your previous answer.",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("Open the grid", web_app=WebAppInfo(url=url))]],
-            resize_keyboard=True, one_time_keyboard=True))
+    offer = _grid_offer(chat_id, code, update.effective_user.id)
+    if offer is None:
+        return False
+    context.user_data["grid_event"] = (chat_id, code)
+    await update.effective_message.reply_text(offer[0], reply_markup=offer[1])
     return True
+
+
+async def on_tap_through(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """"Tap through a calendar" - the original flow, still here.
+
+    The event usually belongs to a group while the tapping happens in a
+    private chat, so the target is remembered for the callbacks that follow;
+    without it they would look the event up in the DM and not find it.
+    """
+    target = context.user_data.get("grid_event")
+    if not target:
+        await update.effective_message.reply_text(
+            "Which event? /add picks one.", reply_markup=persistent_keyboard())
+        return
+    chat_id, code = target
+    event = storage.get_event(chat_id, code)
+    if not event:
+        await update.effective_message.reply_text(
+            "That event no longer exists.", reply_markup=persistent_keyboard())
+        return
+    context.chat_data["adding_for"] = {"chat": chat_id, "code": code}
+    now = datetime.now()
+    await update.effective_message.reply_text(
+        f"Pick dates for '{event['name']}'"
+        f"{_slots_summary(chat_id, code, update.effective_user.id)}",
+        reply_markup=keyboards.month_calendar(now.year, now.month, code))
+
+
+async def _offer_privately(context: ContextTypes.DEFAULT_TYPE, user_id: int,
+                           chat_id: int, rows) -> bool:
+    """DM the person their way in. False if Telegram will not let us."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    try:
+        if len(rows) == 1:
+            offer = _grid_offer(chat_id, rows[0]["code"], user_id)
+            if offer is None:
+                return False
+            context.user_data["grid_event"] = (chat_id, rows[0]["code"])
+            await context.bot.send_message(user_id, offer[0], reply_markup=offer[1])
+            return True
+        await context.bot.send_message(
+            user_id, "Which event do you want to add your times to?",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(f"{r['name']} ({r['code']})",
+                                       url=_deep_link(context.bot, chat_id, r["code"]))]
+                 for r in rows]))
+        return True
+    except Exception:
+        log.info("cannot DM %s yet - answering in the group instead", user_id)
+        return False
 
 
 async def on_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -664,12 +736,16 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         await update.effective_message.reply_text("No events yet - /create <Name> first.")
         return
-    # In a group the grid cannot open: Telegram only lets a Mini App answer
-    # from a private chat. So the group gets one message of links, and the
-    # painting happens where it is allowed to happen.
-    if update.effective_chat.type != "private" and config.WEBAPP_URL:
+    # Answering happens privately - a Mini App may only reply from a DM, and
+    # a group does not want everybody's screens in it. So the reply goes to
+    # the person, and the group hears nothing at all.
+    if update.effective_chat.type != "private":
+        if await _offer_privately(context, update.effective_user.id, chat_id, rows):
+            return
+        # Telegram forbids a bot from messaging someone who has never started
+        # it, and for them a silent group is the same as a broken bot.
         await update.effective_message.reply_text(
-            "Paint your availability - this opens our private chat:",
+            "Tap to add your times - it opens our private chat:",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton(f"{r['name']} ({r['code']})",
                                        url=_deep_link(context.bot, chat_id, r["code"]))]
@@ -940,6 +1016,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         code = parts[-1] if action != "del_slot" else parts[1]
         if action in ("view", "del_evt", "done") :
             code = parts[1]
+        # Tapping through a calendar in a private chat for a group's event:
+        # the event lives in the group, not in the chat the buttons are in.
+        adding = context.chat_data.get("adding_for")
+        if adding and adding.get("code") == code:
+            chat_id = adding["chat"]
         event = storage.get_event(chat_id, code)
         if not event:
             await query.edit_message_text("That event no longer exists.")
@@ -990,6 +1071,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "done":
         code = parts[1]
+        context.chat_data.pop("adding_for", None)
         flows.finish(context, flows.SCHEDULE)   # a result screen, keep it
         await query.edit_message_text(
             f"Saved for '{event['name']}'.{_slots_summary(chat_id, code, user_id)}\n\n"
@@ -1225,6 +1307,9 @@ def main() -> None:
     application.add_handler(MessageHandler(
         filters.TEXT & filters.ChatType.PRIVATE & filters.Text(["Just for me"]),
         on_just_for_me), group=-1)
+    application.add_handler(MessageHandler(
+        filters.TEXT & filters.ChatType.PRIVATE & filters.Text([TAP_THROUGH]),
+        on_tap_through), group=-1)
     application.add_handler(CallbackQueryHandler(on_callback))
 
     application.add_error_handler(on_error)

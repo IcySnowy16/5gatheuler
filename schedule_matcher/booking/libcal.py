@@ -389,7 +389,13 @@ async def checkout(email: str, code: str) -> tuple[bool, str]:
 # So a code alone is enough to learn when a booking starts, which lets the
 # bot track bookings made on the website without being told the time.
 
-_STARTS_AT_RE = re.compile(r"booking starts at\s*(\d{1,2}:\d{2}\s*[ap]m)", re.I)
+# The refusal before a check-in window opens names the whole moment:
+# "booking starts at 12:30pm Wednesday, September 9, 2026". Reading only the
+# clock and assuming today put every future booking on the wrong day.
+_STARTS_AT_RE = re.compile(
+    r"booking starts at\s*(\d{1,2}:\d{2}\s*[ap]m)"
+    r"(?:\s*(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s*"
+    r"([a-z]+\s+\d{1,2},?\s*\d{4}))?", re.I)
 _UNTIL_RE = re.compile(r"until\s*(\d{1,2}:\d{2}\s*[ap]m)", re.I)
 _TIME_RE = re.compile(r"(\d{1,2}:\d{2}\s*[ap]m)", re.I)
 _UNKNOWN_CODE_RE = re.compile(r"find booking matching code|invalid code", re.I)
@@ -401,6 +407,19 @@ def _clock(text: str) -> time | None:
         return datetime.strptime(text.replace(" ", "").lower(), "%I:%M%p").time()
     except ValueError:
         return None
+
+
+def _calendar_date(text: str | None) -> date | None:
+    """'September 9, 2026' -> a real date. None when the site did not say."""
+    if not text:
+        return None
+    cleaned = re.sub(r"\s+", " ", text.replace(",", "")).strip()
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 async def confirm_booking(lid: int, gid: int, item_id: int,
@@ -515,7 +534,9 @@ async def probe_code(email: str, code: str) -> dict:
         if m:
             t = _clock(m.group(1))
             if t:
-                out["start"] = datetime.combine(today, t)
+                # The day the site named, not the day we happen to be asking.
+                out["start"] = datetime.combine(
+                    _calendar_date(m.group(2)) or today, t)
 
     if out["space"] is None and details:
         for line in (l.strip() for l in

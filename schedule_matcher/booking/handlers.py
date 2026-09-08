@@ -1744,21 +1744,48 @@ def _gone_note(gone) -> str:
 
 
 async def cmd_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """What you have on now or coming up. /bookings all opens the history.
+
+    Finished bookings are kept - they are what /mostused ranks your usual
+    libraries and desks by - but they are records, not a list you need to read
+    past every time you check what is next.
+    """
     user_id = update.effective_user.id
+    show_all = bool(context.args) and context.args[0].lower() in (
+        "all", "past", "history", "everything")
     live, gone = await _live_bookings(user_id)          # correct the record first
     live_ids = {r["id"] for r in live}
-    rows = storage.list_bookings(user_id, active_only=False)[-10:]
+    everything = storage.list_bookings(user_id, active_only=False)
+    rows = everything[-15:] if show_all else live
+    finished = len(everything) - len(live)
+
     if not rows:
+        if not everything:
+            await update.effective_message.reply_text(
+                "No bookings recorded yet. Try /book.\n\n" + NO_LISTING_HINT)
+            return
         await update.effective_message.reply_text(
-            "No bookings recorded yet. Try /book.\n\n" + NO_LISTING_HINT)
+            "Nothing booked now or coming up."
+            + (f"\n\n({finished} finished - /bookings all shows them.)"
+               if finished else "")
+            + _gone_note(gone))
         return
+
     lines = []
     for r in rows:
         code = f" - code {r['checkin_code']}" if r["checkin_code"] else " - no code yet"
         mark = " - confirmed on the site" if r["id"] in live_ids else ""
         lines.append(f"#{r['id']} {r['room_name']} ({r['location']}) "
                      f"{r['start_ts']} to {r['end_ts'][-5:]} [{r['status']}]{code}{mark}")
-    await update.effective_message.reply_text("\n".join(lines) + _gone_note(gone))
+    if show_all:
+        head = "Everything on record, oldest first:\n"
+        foot = "\n\nFinished ones are kept only to work out your usual spots for /mostused."
+    else:
+        head = ""
+        foot = (f"\n\n{finished} finished booking(s) hidden - /bookings all shows them."
+                if finished else "")
+    await update.effective_message.reply_text(
+        head + "\n".join(lines) + foot + _gone_note(gone))
 
 
 async def cmd_scheduled(update: Update, context: ContextTypes.DEFAULT_TYPE):

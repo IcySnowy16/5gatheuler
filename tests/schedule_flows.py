@@ -397,12 +397,28 @@ async def test_no_webapp_fallback():
     config.WEBAPP_URL = ""
     try:
         ctx = Context()
-        await B._create_event(Update(GROUP, "supergroup"), ctx, "Old school")
+        quiet = -1009999999999          # a group with exactly one event
+        await B._create_event(Update(quiet, "supergroup"), ctx, "Old school")
         check("fallback: plain creation message",
               "use /add to enter availability" in last("created!"))
-        await B.cmd_add(Update(GROUP, "supergroup"), ctx)
-        check("fallback: /add offers the event picker",
-              "Which event?" in last("Which event?"))
+        # It still answers privately - only the offer is thinner.
+        dms = []
+        original = BOT.send_message
+
+        async def watch(chat_id, text, reply_markup=None, **kw):
+            if chat_id == ME:
+                dms.append((text, reply_markup))
+                return Msg(chat_id, "private")
+            return await original(chat_id, text, reply_markup, **kw)
+
+        BOT.send_message = watch
+        try:
+            await B.cmd_add(Update(quiet, "supergroup"), ctx)
+        finally:
+            BOT.send_message = original
+        offered = [b.text for row in dms[-1][1].keyboard for b in row] if dms else []
+        check("fallback: the calendar is offered on its own",
+              offered == [B.TAP_THROUGH], offered)
     finally:
         config.WEBAPP_URL = saved
 
@@ -487,14 +503,31 @@ async def test_commands_end_to_end():
 
 
 async def test_group_add_links():
-    ctx, code, _days = await make_event("Linkable")
-    await B.cmd_add(Update(GROUP, "supergroup"), ctx)
-    markup = markup_of("opens our private chat")
-    urls = [b.url for row in markup.inline_keyboard for b in row]
-    check("/add in a group: every event gets a link",
-          all(u and "start=add_" in u for u in urls), str(urls[:1]))
-    check("/add in a group: one message, not one per event",
-          len([t for t, _ in SENT if "opens our private chat" in t]) == 1)
+    """Several events in one group: the DM lists them, the group hears nothing."""
+    ctx, _code, _days = await make_event("Linkable")
+    SENT.clear()
+    dms = []
+    original = BOT.send_message
+
+    async def watch(chat_id, text, reply_markup=None, **kw):
+        if chat_id == ME:
+            dms.append((text, reply_markup))
+            return Msg(chat_id, "private")
+        return await original(chat_id, text, reply_markup, **kw)
+
+    BOT.send_message = watch
+    try:
+        await B.cmd_add(Update(GROUP, "supergroup"), ctx)
+    finally:
+        BOT.send_message = original
+    check("/add in a group: the group is not written to", not SENT, str(SENT[:1]))
+    check("/add in a group: one private message, not one per event",
+          len(dms) == 1, str(len(dms)))
+    markup = dms[-1][1]
+    urls = [b.url for row in getattr(markup, "inline_keyboard", [])
+            for b in row]
+    check("/add in a group: every event gets a working link",
+          urls and all(u and "start=add_" in u for u in urls), str(urls[:1]))
 
 
 async def test_person_renamed():
@@ -520,6 +553,74 @@ async def test_event_days_without_a_range():
           days2 == [start.date()], str(days2))
 
 
+async def test_both_ways_in():
+    """The grid and the calendar side by side, and a group that stays quiet."""
+    solo = -1002222222222          # its own group: exactly one event
+    ctx, code, days = await make_event("Two ways", chat=solo)
+
+    # /add in the group must say nothing there and message the person instead
+    SENT.clear()
+    dms = []
+    original = BOT.send_message
+
+    async def watch(chat_id, text, reply_markup=None, **kw):
+        if chat_id == ME:
+            dms.append((text, reply_markup))
+            return Msg(chat_id, "private")
+        return await original(chat_id, text, reply_markup, **kw)
+
+    BOT.send_message = watch
+    try:
+        await B.cmd_add(Update(solo, "supergroup"), ctx)
+        check("group /add: nothing is posted in the group", not SENT, str(SENT[:1]))
+        check("group /add: the person is messaged privately", len(dms) == 1)
+        offered = [b.text for row in dms[-1][1].keyboard for b in row]
+        check("group /add: both ways are offered",
+              "Open the grid" in offered and B.TAP_THROUGH in offered, offered)
+    finally:
+        BOT.send_message = original
+
+    # the calendar must then work on the group's event from the private chat
+    ctx.user_data["grid_event"] = (solo, code)
+    await B.on_tap_through(Update(ME, "private"), ctx)
+    check("calendar: opens a month", "Pick dates" in last("Pick dates"))
+    check("calendar: remembers whose event it is",
+          ctx.chat_data.get("adding_for") == {"chat": solo, "code": code},
+          ctx.chat_data.get("adding_for"))
+
+    day = days[2]
+    await B.on_callback(Update(ME, "private", Query(
+        f"t_save|{day.year}|{day.month}|{day.day}|9|0|11|0|{code}",
+        ME, "private")), ctx)
+    stored = [iv for iv in storage.user_slots(solo, code, ME)
+              if iv[0].date() == day]
+    check("calendar: the slot lands on the group's event",
+          stored and stored[0][0].hour == 9 and stored[0][1].hour == 11, str(stored))
+    check("calendar: nothing leaks into the private chat's own events",
+          storage.user_slots(ME, code, ME) == [])
+
+    await B.on_callback(Update(ME, "private", Query(f"done|{code}", ME, "private")), ctx)
+    check("calendar: Done forgets the target", "adding_for" not in ctx.chat_data)
+
+    # somebody the bot may not message must still be told something
+    async def refuse(chat_id, text, reply_markup=None, **kw):
+        if chat_id == ME:
+            raise RuntimeError("Forbidden: bot can't initiate conversation")
+        return await original(chat_id, text, reply_markup, **kw)
+
+    BOT.send_message = refuse
+    SENT.clear()
+    try:
+        await B.cmd_add(Update(solo, "supergroup"), ctx)
+        check("group /add: a stranger to the bot still gets a way in",
+              SENT and "private chat" in SENT[-1][0], str(SENT[-1:]))
+        links = [b.url for row in SENT[-1][1].inline_keyboard for b in row]
+        check("group /add: and the way in is a working link",
+              all(u and "start=add_" in u for u in links), str(links))
+    finally:
+        BOT.send_message = original
+
+
 async def main():
     ctx, code, days = await test_create_and_dates()
     await test_paint_round_trip(ctx, code, days)
@@ -541,6 +642,7 @@ async def main():
     await test_group_add_links()
     await test_person_renamed()
     await test_event_days_without_a_range()
+    await test_both_ways_in()
 
     print()
     width = max(len(n) for n, _, _ in RESULTS)

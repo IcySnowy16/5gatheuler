@@ -162,11 +162,18 @@ Send `/menu` — everything is buttons; nothing has to be typed.
   that slot every week - one race per occurrence, set up as each week's window
   comes near, never a term's worth of requests at once. `/recurring` lists
   them with pause and delete.
-- `/fav`, `/bookings`, `/scheduled`, `/availability`, `/rules`, `/mostused`.
+- `/bookings` shows what is on now or coming up; `/bookings all` opens the
+  history. Finished bookings are kept only to work out your usual spots for
+  `/mostused`.
+- `/fav`, `/scheduled`, `/availability`, `/rules`, `/mostused`.
 
 **Schedule Matcher**
 - `/create` names the event and asks which days it covers, then posts one
   message in the group with a **Paint my availability** link.
+- **`/add` answers privately.** Run it in the group and the bot messages *you*
+  — the group hears nothing. You get both ways in: drag the grid, or tap
+  through the calendar, whichever suits. (Someone who has never started the
+  bot gets a link in the group, since otherwise they would get nothing.)
 - **`/create` works from a private chat too.** Telegram's own group picker
   offers the groups the bot is already in; the event is created there and the
   message appears in the group, not in your DM. *Just for me* keeps it
@@ -249,6 +256,7 @@ python tests/smoke_handlers.py     # every command and callback, does it raise?
 python tests/schedule_flows.py     # is the scheduling half's answer correct?
 python tests/webapp_page.py        # drives the grid in a real browser
 python tests/booking_categories.py # every library category, in every mode
+python tests/booking_codes.py      # what the bot makes of a check-in code
 ```
 
 `tests/smoke_handlers.py` calls every command and callback branch with mock
