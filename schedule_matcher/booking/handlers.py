@@ -1535,12 +1535,15 @@ async def _file_code(send, context, user_id: int, code: str, found: dict,
         lead = "Matched your booking"
 
     _apply_capture(booking_id, {"checkin_code": code})
+    moved = storage.clear_code_elsewhere(user_id, code, booking_id)
     booking = storage.get_booking(booking_id)
     shown_start = datetime.strptime(booking["start_ts"], storage.FMT)
     shown_end = datetime.strptime(booking["end_ts"], storage.FMT)
     details = (f"{booking['room_name']}\n{booking['location']}\n"
                f"{shown_start:%a %d %b, %H:%M} - {shown_end:%H:%M}")
 
+    took_from = (f"\n\n(Taken off #{', #'.join(str(i) for i in moved)}, which "
+                 "had the same code.)" if moved else "")
     if found["checked_in"]:
         storage.update_booking(booking_id, status="checked_in")
         tasks.spawn(_proof_only(context.bot, user_id, booking, code),
@@ -1551,7 +1554,8 @@ async def _file_code(send, context, user_id: int, code: str, found: dict,
                    f"leave - the space is yours until {shown_end:%H:%M}.")
     else:
         await send(f"{lead}:\n\n{details}\n\nCode {code} saved. I'll check you "
-                   "in automatically from 2 minutes before it starts.")
+                   "in automatically from 2 minutes before it starts."
+                   + took_from)
 
 
 async def _ask_which_booking_for_code(message, context, code: str, found: dict,
@@ -1784,8 +1788,35 @@ async def cmd_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         head = ""
         foot = (f"\n\n{finished} finished booking(s) hidden - /bookings all shows them."
                 if finished else "")
+    kb = [[InlineKeyboardButton(f"✎ Fix #{r['id']} {_booking_button_label(r)}",
+                                callback_data=f"bk|fix|{r['id']}")]
+          for r in rows[-6:]]
     await update.effective_message.reply_text(
-        head + "\n".join(lines) + foot + _gone_note(gone))
+        head + "\n".join(lines) + foot + _gone_note(gone),
+        reply_markup=InlineKeyboardMarkup(kb) if kb else None)
+
+
+async def _r_fix_booking(query, booking) -> None:
+    """What can be done to a record that is wrong rather than unwanted."""
+    start = datetime.strptime(booking["start_ts"], storage.FMT)
+    end = datetime.strptime(booking["end_ts"], storage.FMT)
+    code = booking["checkin_code"]
+    rows = []
+    if code:
+        rows.append([InlineKeyboardButton(f"Clear the code ({code})",
+                                          callback_data=f"bk|fclr|{booking['id']}")])
+    rows.append([InlineKeyboardButton("Forget this record",
+                                      callback_data=f"bk|fdel|{booking['id']}")])
+    rows.append([InlineKeyboardButton("Cancel it at the library",
+                                      callback_data=f"bk|cx|{booking['id']}")])
+    await query.edit_message_text(
+        f"#{booking['id']} {booking['room_name']}\n{booking['location']}\n"
+        f"{start:%a %d %b, %H:%M} - {end:%H:%M}\n"
+        f"Code: {code or 'none saved'}\n\n"
+        "Clearing the code or forgetting the record only changes what I know - "
+        "the library is untouched, so a real booking stays booked. To give the "
+        "space back, cancel it at the library instead.",
+        reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cmd_scheduled(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2690,6 +2721,30 @@ async def on_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             await _file_code(query.edit_message_text, context,
                              query.from_user.id, pending["code"],
                              pending["found"], match)
+            return
+
+        if action in ("fix", "fclr", "fdel"):
+            booking = storage.get_booking(int(parts[2]))
+            if booking is None or booking["user_id"] != query.from_user.id:
+                await query.edit_message_text("That booking is gone already.")
+                return
+            if action == "fix":
+                await _r_fix_booking(query, booking)
+                return
+            if action == "fclr":
+                storage.update_booking(booking["id"], checkin_code=None,
+                                       checkin_attempts=0)
+                await query.edit_message_text(
+                    f"Code cleared from #{booking['id']}. Send /code with the "
+                    "right one and I will ask which booking it belongs to.")
+                return
+            # Forgetting a record must never quietly leave a photo of it behind.
+            await purge_proofs(context.bot, rows=[booking])
+            storage.delete_booking(booking["id"])
+            await query.edit_message_text(
+                f"Forgotten #{booking['id']} {booking['room_name']}.\n\n"
+                "That was only my record - if it was a real booking, the "
+                "library still has it. /bookings shows what is left.")
             return
 
         if action == "scancel":

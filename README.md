@@ -165,6 +165,11 @@ Send `/menu` — everything is buttons; nothing has to be typed.
 - `/bookings` shows what is on now or coming up; `/bookings all` opens the
   history. Finished bookings are kept only to work out your usual spots for
   `/mostused`.
+- Each one has a **Fix** button: clear a code that ended up on the wrong
+  booking, or forget a record that was never a booking. Both change only what
+  the bot knows — the library is untouched, and cancelling for real is a
+  separate button on the same screen. A code can only sit on one booking, so
+  filing it against the right one takes it off the wrong one by itself.
 - `/fav`, `/scheduled`, `/availability`, `/rules`, `/mostused`.
 
 **Schedule Matcher**

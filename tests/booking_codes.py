@@ -74,6 +74,45 @@ async def probe(kind):
     return await libcal.probe_code("someone@e.ntu.edu.sg", "E8H")
 
 
+async def test_records_can_be_corrected():
+    """A code on the wrong booking, and a record that should never have been.
+
+    Exactly the mess the date bug left behind: a phantom row holding the code,
+    and the real booking holding none.
+    """
+    from datetime import timedelta
+    from schedule_matcher import storage
+
+    uid = 4242
+    storage.save_user(uid, email="t@e.ntu.edu.sg")
+    now = datetime.now().replace(second=0, microsecond=0)
+    phantom = storage.add_booking(uid, "(booked by you)", "your own booking",
+                                  "your booking", None,
+                                  now - timedelta(hours=6), now - timedelta(hours=4))
+    storage.update_booking(phantom, checkin_code="E8H")
+    real = storage.add_booking(uid, "Lee Wee Nam Library", "Learning Pod",
+                               "LWNL Pod 1", 46002, now + timedelta(days=1),
+                               now + timedelta(days=1, hours=3))
+
+    # a code belongs to one booking: filing it anew takes it off the old one
+    moved = storage.clear_code_elsewhere(uid, "E8H", real)
+    storage.update_booking(real, checkin_code="E8H")
+    check("code moves: taken off the booking that had it", moved == [phantom], moved)
+    check("code moves: the old record keeps everything else",
+          storage.get_booking(phantom) is not None
+          and storage.get_booking(phantom)["checkin_code"] is None)
+    check("code moves: the right booking has it now",
+          storage.get_booking(real)["checkin_code"] == "E8H")
+
+    # and a record that was never a booking can be forgotten
+    storage.delete_booking(phantom)
+    check("forget: the record is gone", storage.get_booking(phantom) is None)
+    check("forget: it took nothing else with it",
+          storage.get_booking(real) is not None)
+    check("forget: /bookings has only the real one",
+          [r["id"] for r in storage.list_bookings(uid, active_only=False)] == [real])
+
+
 async def main():
     libcal._client = lambda: FakeClient()                 # no network at all
 
@@ -119,6 +158,8 @@ async def main():
     check("date reader: nonsense is None",
           libcal._calendar_date("next Tuesday") is None)
     check("date reader: nothing is None", libcal._calendar_date(None) is None)
+
+    await test_records_can_be_corrected()
 
     width = max(len(n) for n, _, _ in RESULTS)
     failed = 0

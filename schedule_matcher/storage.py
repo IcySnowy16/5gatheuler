@@ -514,6 +514,37 @@ def update_booking(booking_id: int, **fields) -> None:
     c.commit()
 
 
+def delete_booking(booking_id: int) -> None:
+    """Forget a booking record. The library is not touched.
+
+    Wanted when a record is wrong rather than the booking is: one filed under
+    the wrong day, or one the bot invented from a code it misread. Cancelling
+    at the library is a different act - see the cancel flow.
+    """
+    c = conn()
+    c.execute("DELETE FROM bookings WHERE id=?", (booking_id,))
+    c.commit()
+
+
+def clear_code_elsewhere(user_id: int, code: str, keep_id: int) -> list[int]:
+    """A check-in code belongs to exactly one booking.
+
+    Attaching it somewhere new takes it off wherever it was, so a code the bot
+    once filed against the wrong booking corrects itself the moment it is
+    filed against the right one.
+    """
+    c = conn()
+    rows = c.execute(
+        "SELECT id FROM bookings WHERE user_id=? AND checkin_code=? AND id<>?",
+        (user_id, code, keep_id)).fetchall()
+    if rows:
+        c.execute(
+            "UPDATE bookings SET checkin_code=NULL WHERE user_id=? AND"
+            " checkin_code=? AND id<>?", (user_id, code, keep_id))
+        c.commit()
+    return [r["id"] for r in rows]
+
+
 def get_booking(booking_id: int) -> sqlite3.Row | None:
     return conn().execute("SELECT * FROM bookings WHERE id=?", (booking_id,)).fetchone()
 
