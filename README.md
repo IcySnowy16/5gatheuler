@@ -86,12 +86,24 @@ desk names — **ships with the code** in `booking/catalog_seed.json`, so a new
 install knows that Arrakis is day-of-only before anyone signs in.
 
 That file is a starting point, not something to maintain. Once somebody has
-signed in, the bot **checks the library for itself** every `CATALOG_MAX_AGE_DAYS`
-(14) at startup: one browser session reads each library's own category list,
-and anything it has not seen before is learned properly — hours, notice
-period, length caps, desk names — and announced to the owner. So a room NTU
-adds next term appears in `/book` without anyone editing anything.
-`/refreshcatalog` forces the same thing on demand and rewrites the seed.
+signed in, the bot **looks at the library itself every time it starts** — one
+browser session, six page loads, about a minute and a half — and reports what
+changed: a new room, a renamed one, a room that is gone. Anything new is
+learned properly (hours, notice period, caps, desk names). That matters on a
+machine that is only on a few days a week: it should never be the one holding
+last month's names.
+
+The slow pass — re-reading every desk name and policy — waits for
+`CATALOG_MAX_AGE_DAYS` (14). Neither runs if a scheduled booking is due within
+15 minutes; a 23:59 window does not wait for a browse.
+
+**`/refreshcatalog`** (in Settings) does the quick look on demand, and
+`/refreshcatalog full` the slow one. Both rewrite the seed if anything changed,
+so the correction can be committed for every other machine.
+
+**`/developer`** answers "is this machine even running the new code?" — it
+names the branch, the commit and when it was checked out, the catalogue's size
+and age, and whether the grid is live.
 
 > **One bot, one machine.** Two copies polling the same `TELEGRAM_TOKEN` fight
 > over updates and both misbehave. Stop the old one first, or give the second

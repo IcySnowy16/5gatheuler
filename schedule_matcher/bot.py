@@ -65,6 +65,7 @@ LIBRARY_MENU = {
         ("Set up my NTU login", "/setup"),
         ("Bot inbox for confirmation emails", "/botemail"),
         ("Library rules I know", "/rules"),
+        ("Update the room list from the library", "/refreshcatalog"),
         ("How many shortcuts to show", "/mostused"),
         ("Wipe my credentials", "/forgetme"),
     ]),
@@ -77,7 +78,6 @@ DEV_MENU = {
         ("Spaces I'm holding", "/holds"),
         ("How long chopes last", "/holdtime"),
         ("Diagnostics", "/developer"),
-        ("Re-read the library catalogue", "/refreshcatalog"),
         ("Developer mode on/off", "/dev"),
     ]),
 }
@@ -128,7 +128,8 @@ HELP = (
     "  Advanced: /groupbook, /extendedbooking, /recurring\n"
     "  View: /bookings, /scheduled, /availability\n"
     "  Edit: /cancelbooking, /move\n"
-    "  Settings: /setup, /botemail, /rules, /mostused, /forgetme\n\n"
+    "  Settings: /setup, /botemail, /rules, /refreshcatalog, /mostused,\n"
+    "            /forgetme\n\n"
     "Use the two buttons under the message box, or the menu button beside "
     "it - nothing has to be typed."
 )
@@ -1208,11 +1209,22 @@ async def _catalogue_watch(app) -> None:
 
     if config.CATALOG_MAX_AGE_DAYS <= 0:
         return
-    age = storage.durable_age_days("category_meta")
-    if age is not None and age < config.CATALOG_MAX_AGE_DAYS:
-        log.info("Catalogue: %.1f days old, next look in %.1f.",
-                 age, config.CATALOG_MAX_AGE_DAYS - age)
+    # A machine that is only on a few days a week must not be the machine with
+    # last month's room names, so the cheap check happens every start: six
+    # page loads in one browser session. The expensive pass - every desk name
+    # and policy re-read - still waits for CATALOG_MAX_AGE_DAYS.
+    # Never let a browse for room names compete with a booking race: the check
+    # costs a browser and a minute or two, and a 23:59 window does not wait.
+    racing = storage.conn().execute(
+        "SELECT 1 FROM scheduled_bookings WHERE status IN ('pending','retrying')"
+        " AND fire_at <= ? LIMIT 1",
+        ((datetime.now() + timedelta(minutes=15)).strftime(storage.FMT),)).fetchone()
+    if racing:
+        log.info("Catalogue: a booking is about to fire, so the look at the "
+                 "library waits for the next start.")
         return
+    age = storage.durable_age_days("category_meta")
+    deep = age is None or age >= config.CATALOG_MAX_AGE_DAYS
     row = storage.conn().execute(
         "SELECT user_id, ntu_username, ntu_password FROM users"
         " WHERE ntu_username IS NOT NULL AND ntu_password IS NOT NULL"
@@ -1222,23 +1234,24 @@ async def _catalogue_watch(app) -> None:
                  "stands. It gains anything new the first time someone does.")
         return
     try:
-        added = await catalog.discover(row["user_id"],
-                                       credstore.decrypt(row["ntu_username"]),
-                                       credstore.decrypt(row["ntu_password"]))
+        changed = await catalog.discover(row["user_id"],
+                                         credstore.decrypt(row["ntu_username"]),
+                                         credstore.decrypt(row["ntu_password"]),
+                                         deep=deep)
     except Exception:
         log.warning("catalogue check failed", exc_info=True)
         return
-    if not added:
-        log.info("Catalogue: checked, nothing new at the library.")
+    if not changed:
+        log.info("Catalogue: checked%s, nothing has changed at the library.",
+                 " thoroughly" if deep else "")
         return
-    log.info("Catalogue: learned %s", ", ".join(added))
+    log.info("Catalogue: %s", "; ".join(changed))
     if config.OWNER_ID:
         try:
             await app.bot.send_message(
                 config.OWNER_ID,
-                "The library has something I had not seen before, so I have "
-                "learned it: " + ", ".join(added)
-                + ".\n\nIt is in /book now.")
+                "The library has changed since I last looked:\n  "
+                + "\n  ".join(changed) + "\n\n/book has it now.")
         except Exception:
             log.debug("could not tell the owner", exc_info=True)
 

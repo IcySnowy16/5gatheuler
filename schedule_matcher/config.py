@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -220,6 +221,34 @@ def trim_debug_dir() -> None:
             old.unlink(missing_ok=True)
     except Exception:
         pass
+
+
+def code_version() -> str:
+    """Which build is running - the first question when a machine misbehaves.
+
+    A synced folder can leave one computer running last week's code while
+    another has today's, and nothing in a chat window shows the difference.
+    """
+    head = BASE_DIR / ".git" / "HEAD"
+    try:
+        ref = head.read_text(encoding="utf-8").strip()
+        if ref.startswith("ref: "):
+            branch = ref[5:]
+            sha = (BASE_DIR / ".git" / branch).read_text(encoding="utf-8").strip()
+            name = branch.removeprefix("refs/heads/")
+        else:
+            sha, name = ref, "detached"
+        stamp = datetime.fromtimestamp(
+            (BASE_DIR / ".git" / "HEAD").stat().st_mtime)
+        return f"{name} {sha[:7]} ({stamp:%d %b %H:%M})"
+    except Exception:
+        pass
+    try:
+        newest = max((f.stat().st_mtime for f in
+                      (BASE_DIR / "schedule_matcher").rglob("*.py")), default=0)
+        return f"unversioned, newest file {datetime.fromtimestamp(newest):%d %b %H:%M}"
+    except Exception:
+        return "unknown"
 
 
 def validate() -> None:

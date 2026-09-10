@@ -243,13 +243,19 @@ async def learn(user_id: int, username: str, password: str, library: str,
     return entry
 
 
-async def discover(user_id: int, username: str, password: str) -> list[str]:
-    """Find categories the bot does not know yet, and learn them.
+async def discover(user_id: int, username: str, password: str,
+                   deep: bool = False) -> list[str]:
+    """Compare what the library offers with what the bot knows.
 
     Cheap by design: one browser session reads every library's own category
-    list, and only something genuinely new costs the slow per-category work.
-    That is what keeps the shipped seed a starting point rather than a thing
-    anyone has to maintain by hand - if NTU adds a room, the bot finds it.
+    list, and only a category the bot has never seen costs the slow
+    per-category work. That is what keeps the shipped seed a starting point
+    rather than something anyone maintains by hand.
+
+    `deep` re-reads every known category's desk names and policy as well,
+    which takes minutes - worth doing occasionally, not every start.
+
+    Returns a line per change, in words fit to show somebody.
     """
     import asyncio
 
@@ -261,23 +267,47 @@ async def discover(user_id: int, username: str, password: str) -> list[str]:
     names = {c.lid: loc.name for loc in locations for c in loc.categories}
     found = await asyncio.to_thread(browser.harvest_all_categories, user_id,
                                     username, password, lids)
-    added = []
+    changes: list[str] = []
+
     for lid, cats in found.items():
         for gid, label in cats.items():
             key = f"{lid}_{gid}"
-            if key in meta:
-                meta[key]["category"] = label      # the site's own wording
-                continue
             if "staff only" in label.lower():
                 continue
-            log.info("catalogue: learning %s (lid=%s gid=%s)", label, lid, gid)
-            meta[key] = await learn(user_id, username, password,
+            if key not in meta:
+                log.info("catalogue: learning %s (lid=%s gid=%s)", label, lid, gid)
+                meta[key] = await learn(user_id, username, password,
+                                        names.get(lid, ""), label, lid, gid)
+                changes.append(f"new: {label}")
+                continue
+            was = meta[key].get("category")
+            if was and was != label:
+                meta[key]["category"] = label       # the site's own wording
+                changes.append(f"renamed: {was} -> {label}")
+            elif not was:
+                meta[key]["category"] = label
+            if deep:
+                fresh = await learn(user_id, username, password,
                                     names.get(lid, ""), label, lid, gid)
-            added.append(label)
+                before = set((meta[key].get("spaces") or {}).values())
+                after = set((fresh.get("spaces") or {}).values())
+                meta[key] = fresh
+                if before and after and before != after:
+                    changes.append(
+                        f"{label}: {len(after)} spaces "
+                        f"({len(after - before)} new, {len(before - after)} gone)")
+
+        # A category the library has dropped must stop being offered, or the
+        # picker keeps a room nobody can book any more.
+        for key in [k for k, e in meta.items()
+                    if e.get("lid") == lid and e.get("gid") not in cats]:
+            changes.append(f"gone: {meta[key].get('category', key)}")
+            del meta[key]
+
     save(meta)
-    if added:
+    if changes:
         storage.cache_clear("libcal_locations")      # the picker must re-read
-    return added
+    return changes
 
 
 async def refresh(user_id: int, username: str, password: str) -> dict:

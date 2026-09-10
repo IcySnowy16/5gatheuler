@@ -2385,36 +2385,43 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_refreshcatalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Re-read hours, notice periods and desk names from the site.
+    """Go and look at the library now, rather than waiting for a restart.
 
-    The catalogue normally comes from the copy shipped with the code, which is
-    fine because it rarely changes. Run this when the library alters its hours
-    or renames desks - and commit the refreshed `catalog_seed.json` so every
-    other machine gets the correction too.
+    /refreshcatalog       - the quick look: which rooms exist, and their names
+    /refreshcatalog full  - every desk name, opening hour and policy re-read
+
+    The bot does the quick look by itself each time it starts, so this is for
+    when something changed while it was running and you would rather not wait.
     """
-    if (update.effective_chat.type != "private"
-            or not storage.is_developer(update.effective_user.id)):
+    if not await _require_private(update):
         return
     profile = _profile(update.effective_user.id)
     if not profile:
         await update.effective_message.reply_text(
-            "I need your NTU login to read the policy pages - run /setup first.")
+            "I need your NTU login to read the library's own pages - /setup "
+            "does that first.")
         return
+    deep = bool(context.args) and context.args[0].lower() in ("full", "all", "deep")
     await update.effective_message.reply_text(
-        "Re-reading every category from the site. This drives a browser "
-        "through all of them, so give it a few minutes.")
+        "Reading every category, desk name and policy from the site. That is a "
+        "browser page per category, so give it a few minutes."
+        if deep else
+        "Having a look at the library. About a minute.")
 
     async def work():
-        meta = await catalog.refresh(update.effective_user.id,
-                                     profile["username"], profile["password"])
+        changes = await catalog.discover(update.effective_user.id,
+                                         profile["username"], profile["password"],
+                                         deep=deep)
+        meta = catalog._meta()
         spaces = sum(len(e.get("spaces") or {}) for e in meta.values())
-        note = _write_seed(meta)
-        await update.effective_message.reply_text(
-            f"Catalogue refreshed: {len(meta)} categories, {spaces} spaces."
-            f"\n{note}")
+        head = (f"{len(meta)} categories, {spaces} spaces.\n\n"
+                + ("Changes:\n  " + "\n  ".join(changes) if changes
+                   else "Nothing has changed at the library."))
+        note = _write_seed(meta) if changes else ""
+        await update.effective_message.reply_text(head + ("\n\n" + note if note else ""))
 
     tasks.spawn(work(), bot=context.bot, user_id=update.effective_user.id,
-                feature="refreshing the catalogue")
+                feature="checking the library catalogue")
 
 
 def _write_seed(meta: dict) -> str:
@@ -2439,7 +2446,20 @@ async def cmd_developer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (update.effective_chat.type != "private"
             or not storage.is_developer(update.effective_user.id)):
         return
-    lines = [f"Data dir: {config.HOME}"]
+    meta = catalog.all_categories()
+    age = storage.durable_age_days("category_meta")
+    libraries = len({e.get("library") for e in meta})
+    lines = [
+        f"Code: {config.code_version()}",
+        f"Data dir: {config.HOME}",
+        f"Catalogue: {len(meta)} categories in {libraries} libraries, "
+        + ("never checked" if age is None else f"checked {age:.1f} days ago"),
+        f"Grid: {config.WEBAPP_URL or 'off (tap-through calendar)'}",
+    ]
+    missing = [n for n in ("Griffin Booth", "Study Pod", "Arrakis - Single Monitor")
+               if not any(n == e.get("category") for e in meta)]
+    if missing:
+        lines.append("MISSING from the catalogue: " + ", ".join(missing))
     jobs = storage.conn().execute(
         "SELECT id, category, start_ts, fire_at, status, attempts, last_error"
         " FROM scheduled_bookings ORDER BY id DESC LIMIT 5").fetchall()
