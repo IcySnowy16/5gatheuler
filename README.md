@@ -174,6 +174,10 @@ Send `/menu` — everything is buttons; nothing has to be typed.
   on the website yourself. Auto check-in runs at T−2 min, T and T+5 min.
 - **Paste the confirmation email** into the chat: the bot reads the space,
   times, code and cancellation link and files the booking for you.
+- **A check-in names the booking.** The page that lets you in says the library,
+  the space and both times — so a booking filed from a code alone stops being
+  "your booking" and becomes "Griffin Booth 09 (Monitor only)". A name the bot
+  already had is left alone; the page only fills blanks.
 - `/cancelbooking` — cancel *is* check-out on this site; works until the
   booking ends. `/move` books the new slot first, then releases the old one.
 - **Repeat weekly.** Pick the weekdays and an end date once and the bot books

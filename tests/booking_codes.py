@@ -74,6 +74,55 @@ async def probe(kind):
     return await libcal.probe_code("someone@e.ntu.edu.sg", "E8H")
 
 
+async def test_checkin_names_the_booking():
+    """A check-in page names the space better than the bot could."""
+    from datetime import date, datetime
+    from schedule_matcher import storage
+    from schedule_matcher.booking import handlers as bh, libcal
+
+    page = ("Check In Successful! Check In time: 6:28pm "
+            "Name / Email: #WANG ZILU# ZWANG094 / z@e.ntu.edu.sg "
+            "Location: Lee Wee Nam Library Space: Griffin Booth 09 (Monitor only) "
+            "Start Time: 6:30pm Check Out time: 8:30pm Ready to Check Out?")
+
+    read = libcal.read_checkin_fields(page, date(2026, 9, 10))
+    check("check-in page: the space is read",
+          read["space"] == "Griffin Booth 09 (Monitor only)", read["space"])
+    check("check-in page: the library is read",
+          read["location"] == "Lee Wee Nam Library", read["location"])
+    check("check-in page: both times are read",
+          read["start"].hour == 18 and read["end"].hour == 20,
+          f"{read['start']} {read['end']}")
+    check("check-in page: the check-in clock is not mistaken for the start",
+          read["checked_in_at"].minute == 28 and read["start"].minute == 30)
+
+    uid = 5150
+    storage.save_user(uid, email="t@e.ntu.edu.sg")
+    vague = storage.add_booking(uid, "(booked by you)", "your own booking",
+                                "your booking", None,
+                                datetime(2026, 9, 10, 18, 30),
+                                datetime(2026, 9, 10, 20, 30))
+    bh._learn_from_checkin(storage.get_booking(vague), page)
+    got = storage.get_booking(vague)
+    check("check-in: a nameless booking gets its real name",
+          got["room_name"] == "Griffin Booth 09 (Monitor only)", got["room_name"])
+    check("check-in: and its library", got["location"] == "Lee Wee Nam Library")
+
+    known = storage.add_booking(uid, "Lee Wee Nam Library", "Arrakis",
+                                "LIBLWNL-AK-19 (Capacity 1)", 46002,
+                                datetime(2026, 9, 10, 17, 0),
+                                datetime(2026, 9, 10, 19, 0))
+    bh._learn_from_checkin(storage.get_booking(known), page)
+    check("check-in: a name the bot already had is not overwritten",
+          storage.get_booking(known)["room_name"] == "LIBLWNL-AK-19 (Capacity 1)",
+          storage.get_booking(known)["room_name"])
+
+    before = dict(storage.get_booking(vague))
+    bh._learn_from_checkin(storage.get_booking(vague), "Check In Successful!")
+    check("check-in: a page that says nothing changes nothing",
+          dict(storage.get_booking(vague)) == before)
+
+
 async def test_records_can_be_corrected():
     """A code on the wrong booking, and a record that should never have been.
 
@@ -159,6 +208,7 @@ async def main():
           libcal._calendar_date("next Tuesday") is None)
     check("date reader: nothing is None", libcal._calendar_date(None) is None)
 
+    await test_checkin_names_the_booking()
     await test_records_can_be_corrected()
 
     width = max(len(n) for n, _, _ in RESULTS)

@@ -162,8 +162,12 @@ async def _checkin_scan(application) -> None:
         storage.update_booking(b["id"], checkin_attempts=attempts + 1)
         ok, msg = await h.checkin_booking(bot, b["user_id"], b)
         if ok:
+            # The check-in page usually names the space better than we could,
+            # and checkin_booking has just filed that, so read the row again
+            # rather than repeating "your booking" back at somebody.
+            named = storage.get_booking(b["id"]) or b
             await bot.send_message(
-                b["user_id"], f"✅ Checked in to {b['room_name']} "
+                b["user_id"], f"✅ Checked in to {named['room_name']} "
                               f"({start:%H:%M}) automatically.")
         elif attempts + 1 >= len(_CHECKIN_GATES):
             await bot.send_message(

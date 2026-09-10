@@ -1979,6 +1979,40 @@ async def _send_checkin_proof(bot, user_id: int, booking, path: str) -> None:
         log.warning("could not send the check-in photo", exc_info=True)
 
 
+def _learn_from_checkin(booking, page_text: str) -> list[str]:
+    """Take the booking's real name off the page that just let us in.
+
+    A booking filed from a code alone is "your booking" until something says
+    otherwise - and a successful check-in says everything: the library, the
+    space, and both times. Only blanks are filled; a name the bot already had
+    from the booking itself is better than a page scrape and is left alone.
+    """
+    try:
+        fields = libcal.read_checkin_fields(
+            page_text, datetime.strptime(booking["start_ts"], storage.FMT).date())
+    except Exception:
+        return []
+    vague = ("your booking", "(booked by you)", "your own booking", "", None)
+    updates, learned = {}, []
+    if fields["space"] and booking["room_name"] in vague:
+        updates["room_name"] = fields["space"]
+        learned.append(fields["space"])
+    if fields["location"] and booking["location"] in vague:
+        updates["location"] = fields["location"]
+    start, end = fields["start"], fields["end"]
+    if start and end and end > start:
+        # The site's own times beat a two-hour guess made when filing a code.
+        if (booking["start_ts"] != start.strftime(storage.FMT)
+                or booking["end_ts"] != end.strftime(storage.FMT)):
+            updates["start_ts"] = start.strftime(storage.FMT)
+            updates["end_ts"] = end.strftime(storage.FMT)
+            learned.append(f"{start:%H:%M}-{end:%H:%M}")
+    if updates:
+        storage.update_booking(booking["id"], **updates)
+        log.info("check-in named booking #%s: %s", booking["id"], updates)
+    return learned
+
+
 async def checkin_booking(bot, user_id: int, booking, code: str | None = None
                           ) -> tuple[bool, str]:
     """Check in and photograph the result.
@@ -1999,6 +2033,8 @@ async def checkin_booking(bot, user_id: int, booking, code: str | None = None
 
     if ok:
         storage.update_booking(booking["id"], status="checked_in")
+        _learn_from_checkin(booking, message)
+        booking = storage.get_booking(booking["id"])   # so the photo is captioned right
         if path:
             await _send_checkin_proof(bot, user_id, booking, path)
     elif path:

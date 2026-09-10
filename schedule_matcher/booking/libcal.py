@@ -422,6 +422,45 @@ def _calendar_date(text: str | None) -> date | None:
     return None
 
 
+def read_checkin_fields(text: str, on_day: date | None = None) -> dict:
+    """The labelled fields a check-in page answers with.
+
+    A successful check-in names the whole booking:
+
+        Check In time: 6:28pm   Name / Email: ...   Location: Lee Wee Nam Library
+        Space: Griffin Booth 09 (Monitor only)
+        Start Time: 6:30pm      Check Out time: 8:30pm
+
+    That is often more than the bot knew - a booking filed from a code alone
+    is just "your booking" until the library says otherwise - so it is worth
+    reading rather than throwing away with the rest of the page.
+    """
+    day = on_day or date.today()
+    flat = re.sub(r"\s+", " ", text or "")
+
+    def field(label):
+        m = re.search(
+            label + r"\s*:\s*(.{1,60}?)(?=\s*(?:Check In time|Check Out time|"
+            r"Name / Email|Location|Space|Start Time|End Time|Ready|$))",
+            flat, re.I)
+        return m.group(1).strip(" .:|") if m else None
+
+    def clock_in(raw):
+        if not raw:
+            return None
+        m = _TIME_RE.search(raw)
+        t = _clock(m.group(1)) if m else None
+        return datetime.combine(day, t) if t else None
+
+    return {
+        "space": field("Space"),
+        "location": field("Location"),
+        "checked_in_at": clock_in(field("Check In time")),
+        "start": clock_in(field("Start Time")),
+        "end": clock_in(field("Check Out time")) or clock_in(field("End Time")),
+    }
+
+
 async def confirm_booking(lid: int, gid: int, item_id: int,
                           start: datetime, end: datetime) -> str:
     """Is this booking still on the site? 'held', 'gone' or 'unknown'.
@@ -506,26 +545,12 @@ async def probe_code(email: str, code: str) -> dict:
     #   Space: LIBLWNL-AK-08    Start Time: 12:45pm   Check Out time: 2:15pm
     # Read them by name. Guessing "the first two clock times on the page"
     # picked up the check-in clock and called it the booking's start.
-    def field(label):
-        m = re.search(
-            label + r"\s*:\s*(.{1,60}?)(?=\s*(?:Check In time|Check Out time|"
-            r"Name / Email|Location|Space|Start Time|End Time|Ready|$))",
-            text, re.I)
-        return m.group(1).strip(" .:|") if m else None
-
-    out["space"] = field("Space") or out["space"]
-    out["location"] = field("Location")
-
-    def clock_in(raw):
-        if not raw:
-            return None
-        m = _TIME_RE.search(raw)
-        t = _clock(m.group(1)) if m else None
-        return datetime.combine(today, t) if t else None
-
-    out["checked_in_at"] = clock_in(field("Check In time"))
-    out["start"] = clock_in(field("Start Time"))
-    out["end"] = clock_in(field("Check Out time")) or clock_in(field("End Time"))
+    fields = read_checkin_fields(text, today)
+    out["space"] = fields["space"] or out["space"]
+    out["location"] = fields["location"]
+    out["checked_in_at"] = fields["checked_in_at"]
+    out["start"] = fields["start"]
+    out["end"] = fields["end"]
 
     # Not checked in yet: the refusal names the start - "(booking starts at
     # 10:30am)" - which is all we need to file the booking.
