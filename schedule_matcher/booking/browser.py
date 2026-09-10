@@ -185,6 +185,49 @@ def _harvest_room_names(page) -> dict[int, str]:
         return {}
 
 
+def harvest_all_categories(user_id: int, username: str, password: str,
+                           lids: list[int]) -> dict[int, dict[int, str]]:
+    """Every library's category list, in one browser session.
+
+    The site publishes no category list without a login - twenty public
+    endpoints were probed and every one either 404s or redirects to sign-in -
+    so this is the only way the bot can find out for itself what exists. One
+    session for all of them, because launching a browser per library turned a
+    30-second job into minutes.
+    """
+    from playwright.sync_api import sync_playwright
+
+    out: dict[int, dict[int, str]] = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not config.HEADFUL, args=LAUNCH_ARGS)
+        state = _state_path(user_id)
+        context = browser.new_context(
+            storage_state=str(state) if state.exists() else None, user_agent=UA)
+        page = context.new_page()
+        try:
+            for lid in lids:
+                try:
+                    page.goto(f"{BASE}/spaces?lid={lid}",
+                              wait_until="domcontentloaded", timeout=45000)
+                    _maybe_login(page, username, password)
+                    page.wait_for_selector("select#gid", timeout=30000)
+                    opts = page.eval_on_selector_all(
+                        "select#gid option",
+                        "els => els.map(e => [e.innerText.trim(), e.value])")
+                    found = {int(v): t for t, v in opts
+                             if v and v.isdigit() and int(v) > 0 and t}
+                    if found:
+                        out[lid] = found
+                except Exception:
+                    log.warning("could not read the categories of lid=%s", lid,
+                                exc_info=True)
+            context.storage_state(path=str(state))
+            return out
+        finally:
+            context.close()
+            browser.close()
+
+
 def harvest_categories(user_id: int, username: str, password: str,
                        lid: int) -> dict[int, str]:
     """The library's own category list, read off its page.

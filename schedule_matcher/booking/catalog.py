@@ -196,6 +196,90 @@ def parse_policy(text: str) -> dict:
     return out
 
 
+async def learn(user_id: int, username: str, password: str, library: str,
+                label: str, lid: int, gid: int) -> dict:
+    """Everything worth knowing about one category, read off the site."""
+    import asyncio
+
+    from . import browser, libcal
+
+    entry = {"library": library, "category": label, "lid": lid, "gid": gid}
+    hours, grid_ids = {}, set()
+    # Today is skipped for opening hours: its grid only shows what is left of
+    # it, so learning at 3pm would record the library as opening at 3pm. Any
+    # weekday never seen falls back to the usual hours, which is right.
+    for n in range(1, 8):
+        day = date.today() + timedelta(days=n)
+        try:
+            grid = await libcal.fetch_grid(lid, gid, day)
+        except Exception:
+            continue
+        if not grid:
+            continue
+        cells = [c for cs in grid.values() for c in cs]
+        hours[str(day.weekday())] = [f"{min(c.start for c in cells):%H:%M}",
+                                     f"{max(c.end for c in cells):%H:%M}"]
+        grid_ids |= set(grid)
+    if not grid_ids:                    # nothing published ahead: today will do
+        try:
+            grid_ids = set(await libcal.fetch_grid(lid, gid, date.today()))
+        except Exception:
+            pass
+    if hours:
+        entry["hours"] = hours
+    names = await asyncio.to_thread(browser.harvest_names, user_id, username,
+                                    password, lid, gid)
+    if names:
+        libcal.remember_room_names(names)
+        entry["spaces"] = {str(k): v for k, v in names.items()}
+        # Real spaces that the public grid never returned means this category
+        # books seats, and the grid has to be asked for them by name.
+        if grid_ids and not (grid_ids & set(names)):
+            entry["seats"] = True
+    text = await asyncio.to_thread(browser.harvest_policy, user_id, username,
+                                   password, lid, gid)
+    if text:
+        entry.update(parse_policy(text))
+    return entry
+
+
+async def discover(user_id: int, username: str, password: str) -> list[str]:
+    """Find categories the bot does not know yet, and learn them.
+
+    Cheap by design: one browser session reads every library's own category
+    list, and only something genuinely new costs the slow per-category work.
+    That is what keeps the shipped seed a starting point rather than a thing
+    anyone has to maintain by hand - if NTU adds a room, the bot finds it.
+    """
+    import asyncio
+
+    from . import browser, libcal
+
+    meta = _meta()
+    locations = await libcal.fetch_locations()
+    lids = sorted({c.lid for loc in locations for c in loc.categories if c.lid})
+    names = {c.lid: loc.name for loc in locations for c in loc.categories}
+    found = await asyncio.to_thread(browser.harvest_all_categories, user_id,
+                                    username, password, lids)
+    added = []
+    for lid, cats in found.items():
+        for gid, label in cats.items():
+            key = f"{lid}_{gid}"
+            if key in meta:
+                meta[key]["category"] = label      # the site's own wording
+                continue
+            if "staff only" in label.lower():
+                continue
+            log.info("catalogue: learning %s (lid=%s gid=%s)", label, lid, gid)
+            meta[key] = await learn(user_id, username, password,
+                                    names.get(lid, ""), label, lid, gid)
+            added.append(label)
+    save(meta)
+    if added:
+        storage.cache_clear("libcal_locations")      # the picker must re-read
+    return added
+
+
 async def refresh(user_id: int, username: str, password: str) -> dict:
     """Re-read hours, policies and space names for every category."""
     import asyncio

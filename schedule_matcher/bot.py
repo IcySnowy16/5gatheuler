@@ -1196,6 +1196,53 @@ class _RedactToken(logging.Filter):
         return True
 
 
+async def _catalogue_watch(app) -> None:
+    """Go and look at the library now and then, instead of being told.
+
+    The site publishes no category list without a login, which is why a
+    measured copy ships with the code - but a shipped copy is a starting
+    point, not a thing anyone should have to maintain. Once somebody has
+    signed in, the bot checks for itself and learns whatever is new.
+    """
+    from .booking import catalog, credstore
+
+    if config.CATALOG_MAX_AGE_DAYS <= 0:
+        return
+    age = storage.durable_age_days("category_meta")
+    if age is not None and age < config.CATALOG_MAX_AGE_DAYS:
+        log.info("Catalogue: %.1f days old, next look in %.1f.",
+                 age, config.CATALOG_MAX_AGE_DAYS - age)
+        return
+    row = storage.conn().execute(
+        "SELECT user_id, ntu_username, ntu_password FROM users"
+        " WHERE ntu_username IS NOT NULL AND ntu_password IS NOT NULL"
+        " LIMIT 1").fetchone()
+    if row is None:
+        log.info("Catalogue: nobody has signed in yet, so the shipped copy "
+                 "stands. It gains anything new the first time someone does.")
+        return
+    try:
+        added = await catalog.discover(row["user_id"],
+                                       credstore.decrypt(row["ntu_username"]),
+                                       credstore.decrypt(row["ntu_password"]))
+    except Exception:
+        log.warning("catalogue check failed", exc_info=True)
+        return
+    if not added:
+        log.info("Catalogue: checked, nothing new at the library.")
+        return
+    log.info("Catalogue: learned %s", ", ".join(added))
+    if config.OWNER_ID:
+        try:
+            await app.bot.send_message(
+                config.OWNER_ID,
+                "The library has something I had not seen before, so I have "
+                "learned it: " + ", ".join(added)
+                + ".\n\nIt is in /book now.")
+        except Exception:
+            log.debug("could not tell the owner", exc_info=True)
+
+
 async def _check_grid_published() -> None:
     """A working grid or none at all - never a button that goes nowhere.
 
@@ -1264,6 +1311,7 @@ def main() -> None:
         except Exception:
             log.warning("could not publish the command menu", exc_info=True)
         await _check_grid_published()
+        app.create_task(_catalogue_watch(app))
         app.create_task(scheduler.run(app))
         app.create_task(holds.watcher(app))
         app.create_task(holds.restore(app))     # re-take holds a restart dropped

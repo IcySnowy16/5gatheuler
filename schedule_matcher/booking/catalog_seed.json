@@ -36,7 +36,7 @@
   },
   "3368_11823": {
    "advance_days": 0,
-   "category": "Arrakis - Dual Monitors PC",
+   "category": "Arrakis - Dual Monitors",
    "gid": 11823,
    "hours": {
     "6": null
@@ -95,7 +95,7 @@
   },
   "3368_13586": {
    "advance_days": 1,
-   "category": "Immersion@Stargate",
+   "category": "Immersion @ Stargate - Developer's Den",
    "gid": 13586,
    "hours": {
     "6": null
@@ -216,11 +216,7 @@
    "category": "Griffin Booth",
    "gid": 8423,
    "hours": {
-    "0": [
-     "08:30",
-     "21:00"
-    ],
-    "1": [
+    "4": [
      "08:30",
      "21:00"
     ]
@@ -287,7 +283,7 @@
   },
   "3378_11876": {
    "advance_days": 0,
-   "category": "PC / Single Monitor",
+   "category": "PC / Monitor",
    "gid": 11876,
    "hours": {
     "6": null
@@ -430,7 +426,7 @@
   },
   "4903_12344": {
    "advance_days": 1,
-   "category": "Audio-Visual Pods",
+   "category": "Audio-Visual Pod",
    "gid": 12344,
    "hours": {
     "2": [
@@ -451,7 +447,7 @@
   },
   "4903_8447": {
    "advance_days": 30,
-   "category": "AV Room",
+   "category": "ADM AV Room",
    "gid": 8447,
    "hours": {
     "0": [

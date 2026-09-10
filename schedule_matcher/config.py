@@ -89,6 +89,9 @@ SCHED_RETRY_MINUTES = int(os.getenv("SCHED_RETRY_MINUTES", "30"))
 # pending job on every tick, so materialising a whole term at once would mean
 # dozens of requests a minute against the library for weeks on end.
 RECUR_LOOKAHEAD_HOURS = int(os.getenv("RECUR_LOOKAHEAD_HOURS", "26"))
+# How stale the library catalogue may get before the bot goes and looks
+# again. 0 switches the automatic check off.
+CATALOG_MAX_AGE_DAYS = float(os.getenv("CATALOG_MAX_AGE_DAYS", "14"))
 MAX_RULES = int(os.getenv("MAX_RULES", "3"))
 RECUR_MAX_WEEKS = int(os.getenv("RECUR_MAX_WEEKS", "26"))
 SCHED_RETRY_GAP_SECONDS = int(os.getenv("SCHED_RETRY_GAP_SECONDS", "120"))

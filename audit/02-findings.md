@@ -405,3 +405,44 @@ space through Arrakis 20 and PC / Single Monitor 18. All four modes - Book,
 Schedule, Extended, Repeat - draw from the same list, which
 `tests/booking_categories.py` now proves by seeding that exact stale cache and
 walking each mode into the category screen.
+
+
+---
+
+## Fixed 10 Sep: the catalogue now keeps itself
+
+Fair challenge after the Griffin Booth episode: *"shouldn't the code look for
+it itself, not manually add?"* It should. The shipped `catalog_seed.json` was
+produced by hand-probing, so a room NTU adds later would stay invisible until
+somebody noticed and regenerated it.
+
+The site gives no way to avoid a login - `/r/accessible`, `/reserve/<slug>`,
+`/spaces?lid=`, and every other candidate redirect to ADFS when anonymous, so
+there is no public list to read. What there is, once signed in, is each
+library's own `select#gid`.
+
+So `catalog.discover()` reads all six of those in **one** browser session and
+compares them with what the bot knows. Anything new is learned properly -
+hours from the grid, notice period and caps from the policy text, desk names
+from the logged-in page, and the seat-category test - and only something new
+costs that slow work. `bot._catalogue_watch()` runs it at startup when the
+catalogue is older than `CATALOG_MAX_AGE_DAYS` (14) and somebody has signed
+in, and tells the owner what it found. The seed is now a bootstrap for a
+machine that has never logged in, nothing more.
+
+Proved by deleting Griffin Booth from the catalogue and letting the bot find
+it back unaided:
+
+```
+before  : 25 categories | Griffin known: True
+wiped   : 24 categories | Griffin known: False
+after   : 25 categories | Griffin known: True   learned: ['Griffin Booth']
+          notice 1 day, max 2h, 12 spaces
+```
+
+**And that turned up a real fault in how hours were learned.** The relearned
+Griffin Booth came back as opening at **15:00**, which was simply when the
+probe ran: today's grid only publishes what is left of today. Learning now
+starts at tomorrow, and a weekday never observed falls back to the usual
+hours, which is what it always did. The rest of the catalogue was audited for
+the same fault - no other category carried it.

@@ -967,6 +967,13 @@ def cache_get(key: str, max_age_hours: float) -> object | None:
         return None
 
 
+def cache_clear(key: str) -> None:
+    """Throw a cached answer away, so the next asker rebuilds it."""
+    c = conn()
+    c.execute("DELETE FROM kv WHERE key=?", (key,))
+    c.commit()
+
+
 def cache_set(key: str, data: object) -> None:
     c = conn()
     c.execute(

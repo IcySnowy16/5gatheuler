@@ -81,11 +81,17 @@ the data folder should travel with it, and none of it has to:
 | `pw_state_*.json` | The bot signs in again by itself. |
 | `bot.log`, `debug/`, `proof/` | Recreated as needed. |
 
-The library catalogue — hours, notice periods, per-booking caps and all 116
+The library catalogue — hours, notice periods, per-booking caps and all 147
 desk names — **ships with the code** in `booking/catalog_seed.json`, so a new
-install knows that Arrakis is day-of-only before anyone signs in. `/refreshcatalog`
-re-reads it from the site if the library ever changes, and rewrites that file
-so the correction can be committed.
+install knows that Arrakis is day-of-only before anyone signs in.
+
+That file is a starting point, not something to maintain. Once somebody has
+signed in, the bot **checks the library for itself** every `CATALOG_MAX_AGE_DAYS`
+(14) at startup: one browser session reads each library's own category list,
+and anything it has not seen before is learned properly — hours, notice
+period, length caps, desk names — and announced to the owner. So a room NTU
+adds next term appears in `/book` without anyone editing anything.
+`/refreshcatalog` forces the same thing on demand and rewrites the seed.
 
 > **One bot, one machine.** Two copies polling the same `TELEGRAM_TOKEN` fight
 > over updates and both misbehave. Stop the old one first, or give the second
