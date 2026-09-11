@@ -93,6 +93,9 @@ RECUR_LOOKAHEAD_HOURS = int(os.getenv("RECUR_LOOKAHEAD_HOURS", "26"))
 # How stale the library catalogue may get before the bot goes and looks
 # again. 0 switches the automatic check off.
 CATALOG_MAX_AGE_DAYS = float(os.getenv("CATALOG_MAX_AGE_DAYS", "14"))
+# How long after a booking to ask for its check-in code, once, if the
+# confirmation email has not turned up. 0 switches the reminder off.
+CODE_NAG_MINUTES = int(os.getenv("CODE_NAG_MINUTES", "8"))
 MAX_RULES = int(os.getenv("MAX_RULES", "3"))
 RECUR_MAX_WEEKS = int(os.getenv("RECUR_MAX_WEEKS", "26"))
 SCHED_RETRY_GAP_SECONDS = int(os.getenv("SCHED_RETRY_GAP_SECONDS", "120"))

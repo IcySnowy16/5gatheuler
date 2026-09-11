@@ -74,6 +74,50 @@ async def probe(kind):
     return await libcal.probe_code("someone@e.ntu.edu.sg", "E8H")
 
 
+async def test_code_is_asked_for_early():
+    """The code is the one thing the bot cannot work out, so it must ask."""
+    from datetime import datetime, timedelta
+    from schedule_matcher import storage
+    from schedule_matcher.booking import scheduler
+
+    class Bot:
+        sent = []
+        async def send_message(self, uid, text, **k):
+            Bot.sent.append(text)
+
+    class App:
+        bot = Bot()
+
+    uid = 7788
+    now = datetime.now()
+    nocode = storage.add_booking(uid, "LWN", "Learning Pod", "LWNL Pod 2", 46002,
+                                 now + timedelta(days=3),
+                                 now + timedelta(days=3, hours=2))
+    withcode = storage.add_booking(uid, "LWN", "Arrakis", "LIBLWNL-AK-19", 46002,
+                                   now + timedelta(days=3),
+                                   now + timedelta(days=3, hours=2))
+    storage.update_booking(withcode, checkin_code="G7D")
+
+    await scheduler._code_nag_scan(App())
+    check("code reminder: silent straight after booking", not Bot.sent, Bot.sent)
+
+    storage.conn().execute(
+        "UPDATE bookings SET created_at = datetime('now','localtime','-30 minutes')"
+        " WHERE id IN (?,?)", (nocode, withcode))
+    storage.conn().commit()
+    await scheduler._code_nag_scan(App())
+    check("code reminder: asks once the email has had time", len(Bot.sent) == 1,
+          Bot.sent)
+    check("code reminder: says cancelling needs it too",
+          "cancel" in (Bot.sent[0] if Bot.sent else ""), Bot.sent)
+    check("code reminder: leaves a booking that has a code alone",
+          not any("AK-19" in t for t in Bot.sent))
+
+    Bot.sent.clear()
+    await scheduler._code_nag_scan(App())
+    check("code reminder: never asks twice", not Bot.sent, Bot.sent)
+
+
 async def test_checkin_names_the_booking():
     """A check-in page names the space better than the bot could."""
     from datetime import date, datetime
@@ -208,6 +252,7 @@ async def main():
           libcal._calendar_date("next Tuesday") is None)
     check("date reader: nothing is None", libcal._calendar_date(None) is None)
 
+    await test_code_is_asked_for_early()
     await test_checkin_names_the_booking()
     await test_records_can_be_corrected()
 

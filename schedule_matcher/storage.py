@@ -195,6 +195,7 @@ _MIGRATIONS = (
     "ALTER TABLE events ADD COLUMN end_date TEXT",
     "ALTER TABLE events ADD COLUMN board_chat_id INTEGER",
     "ALTER TABLE events ADD COLUMN board_msg_id INTEGER",
+    "ALTER TABLE bookings ADD COLUMN code_nagged INTEGER DEFAULT 0",
 )
 
 FMT = "%Y-%m-%d %H:%M"
@@ -491,6 +492,23 @@ def bookings_with_proof(user_id: int) -> list[sqlite3.Row]:
     return conn().execute(
         "SELECT * FROM bookings WHERE user_id=? AND proof_path IS NOT NULL",
         (user_id,)).fetchall()
+
+
+def bookings_missing_code(after_minutes: int) -> list[sqlite3.Row]:
+    """Bookings made a while ago that still have no check-in code.
+
+    The code is the one thing the bot cannot work out for itself, and
+    everything needs it: checking in, ending early, and cancelling. Asking
+    only five minutes before the start - which is all the bot used to do -
+    leaves a booking made for next week unusable for a week.
+    """
+    return conn().execute(
+        "SELECT * FROM bookings WHERE checkin_code IS NULL"
+        " AND status IN ('booked','pending')"
+        " AND end_ts >= datetime('now','localtime')"
+        " AND COALESCE(code_nagged, 0) = 0"
+        " AND created_at <= datetime('now','localtime', ?)"
+        " ORDER BY start_ts", (f"-{int(after_minutes)} minutes",)).fetchall()
 
 
 def bookings_needing_checkin() -> list[sqlite3.Row]:

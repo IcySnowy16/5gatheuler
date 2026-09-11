@@ -124,6 +124,10 @@ async def run(application) -> None:
         except Exception:
             log.exception("check-in scan failed")
         try:
+            await _code_nag_scan(application)
+        except Exception:
+            log.exception("code reminder failed")
+        try:
             await _prehold_scan(application)
         except Exception:
             log.exception("pre-hold scan failed")
@@ -137,6 +141,28 @@ async def run(application) -> None:
 # Check-in window (library rule R3): 5 min before start until 15 min after.
 # Attempt gates: T-2min, T, T+5min; stop at the first success.
 _CHECKIN_GATES = (timedelta(minutes=-2), timedelta(0), timedelta(minutes=5))
+
+
+async def _code_nag_scan(application) -> None:
+    """Ask once, soon, for a code the confirmation email should have brought.
+
+    Waiting until five minutes before the start is too late to be useful: the
+    same code is what lets you cancel, so a booking made for next week sits
+    unusable until the day. This asks once, a few minutes after booking, when
+    the email has had time to arrive and there is still time to act on it.
+    """
+    if config.CODE_NAG_MINUTES <= 0:
+        return
+    for b in storage.bookings_missing_code(config.CODE_NAG_MINUTES):
+        storage.update_booking(b["id"], code_nagged=1)
+        start = datetime.strptime(b["start_ts"], FMT)
+        await application.bot.send_message(
+            b["user_id"],
+            f"I still have no check-in code for {b['room_name']} on "
+            f"{start:%a %d %b %H:%M}.\n\n"
+            "Paste the confirmation email here, or send /code ABC123. Without "
+            "it I cannot check you in - and I cannot cancel it for you either, "
+            "since cancelling uses the same code.")
 
 
 async def _checkin_scan(application) -> None:

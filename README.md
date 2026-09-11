@@ -193,6 +193,13 @@ Send `/menu` — everything is buttons; nothing has to be typed.
   leg is booked; the rest are choped so nobody takes them.
 - `/checkin` — check in now, or `/checkin ABC123 14:30` for a booking you made
   on the website yourself. Auto check-in runs at T−2 min, T and T+5 min.
+- **The code is the only thing the bot cannot work out for itself.** The
+  addresses it posts to ship with the code, and your email is derived from
+  your NTU username at `/setup` and corrected from the first booking's
+  confirmation page — so a new machine needs nothing handed to it. The
+  per-booking check-in code arrives only by email, and the bot asks for it
+  once, `CODE_NAG_MINUTES` (8) after booking, because without it it can
+  neither check you in nor cancel.
 - **Paste the confirmation email** into the chat: the bot reads the space,
   times, code and cancellation link and files the booking for you.
 - **A check-in names the booking.** The page that lets you in says the library,
