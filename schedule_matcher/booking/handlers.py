@@ -1827,16 +1827,49 @@ async def _r_fix_booking(query, booking) -> None:
 async def cmd_scheduled(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _require_private(update):
         return
-    rows = storage.list_scheduled(update.effective_user.id)
-    if not rows:
-        await update.effective_message.reply_text("No scheduled bookings. /schedulebook creates one.")
+    user_id = update.effective_user.id
+    rows = storage.list_scheduled(user_id)
+
+    # A repeat only becomes a queued job the day its window nears, so this
+    # screen would sit empty for days after setting one up - which reads
+    # exactly like a feature that did not work. Show what is coming anyway.
+    coming = []
+    for rule in storage.list_rules(user_id):
+        if rule["status"] != "active":
+            continue
+        for day, fire in rule_upcoming(rule, limit=2):
+            if not any(r["rule_id"] == rule["id"]
+                       and r["start_ts"].startswith(day.isoformat()) for r in rows):
+                coming.append((day, fire, rule))
+    coming.sort(key=lambda c: c[0])
+
+    if not rows and not coming:
+        await update.effective_message.reply_text(
+            "Nothing queued. /schedulebook books a single slot when its window "
+            "opens; /recurring does it every week.")
         return
+
+    lines = []
+    if rows:
+        lines.append("Queued now - tap below to cancel one:")
+        lines += [f"  {r['category']} {r['start_ts']}, I try at {r['fire_at']}"
+                  + ("  (from a repeat)" if r["rule_id"] else "") for r in rows]
+    if coming:
+        if lines:
+            lines.append("")
+        lines.append("From your repeats, not set up yet:")
+        lines += [f"  {rule['category']} {day:%a %d %b} "
+                  f"{rule['start_hm']}-{rule['end_hm']}, I set it up {fire:%a %d %b %H:%M}"
+                  for day, fire, rule in coming[:6]]
+        lines.append("")
+        lines.append("A repeat becomes a real attempt only when its booking "
+                     "window is near, so this list fills in as the day comes.")
+
     kb = [[InlineKeyboardButton(
         f"Cancel #{r['id']} {r['category']} {r['start_ts']} (fires {r['fire_at'][-11:]})",
         callback_data=f"bk|scancel|{r['id']}")] for r in rows]
-    await flows.start(update, context, flows.LIBRARY,
-                      "Pending scheduled bookings - tap to cancel one:",
-                      reply_markup=InlineKeyboardMarkup(kb))
+    await flows.start(update, context, flows.LIBRARY, "\n".join(lines),
+                      reply_markup=InlineKeyboardMarkup(kb) if kb else None)
 
 
 async def _pick_booking(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -2708,14 +2741,29 @@ async def _until_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return True
 
 
+def rule_upcoming(rule, limit: int = 3) -> list[tuple[date, datetime]]:
+    """The next days a rule will book, and when each will be attempted."""
+    try:
+        until = date.fromisoformat(rule["until_date"])
+        start = dtime.fromisoformat(rule["start_hm"])
+    except (TypeError, ValueError):
+        return []
+    days = _occurrences(rule["lid"], rule["gid"], storage.rule_weekdays(rule),
+                        until, start, limit=limit)
+    return [(d, catalog.window_opens_at(rule["lid"], rule["gid"], d))
+            for d in days]
+
+
 def _rule_line(rule) -> str:
     """One rule, in a sentence."""
     days = _rule_days_text(storage.rule_weekdays(rule))
     until = date.fromisoformat(rule["until_date"])
     paused = " (paused)" if rule["status"] == "paused" else ""
     where = _space_label(rule["item_id"]) if rule["item_id"] else "any space"
+    nxt = rule_upcoming(rule, limit=1)
+    when = f", next {nxt[0][0]:%a %d %b}" if nxt else ", nothing left"
     return (f"{days} {rule['start_hm']}-{rule['end_hm']} {rule['category']}, "
-            f"{where}, until {until:%d %b}{paused}")
+            f"{where}, until {until:%d %b}{when}{paused}")
 
 
 async def cmd_recurring(update: Update, context: ContextTypes.DEFAULT_TYPE):

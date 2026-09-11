@@ -204,7 +204,10 @@ Send `/menu` — everything is buttons; nothing has to be typed.
 - **Repeat weekly.** Pick the weekdays and an end date once and the bot books
   that slot every week - one race per occurrence, set up as each week's window
   comes near, never a term's worth of requests at once. `/recurring` lists
-  them with pause and delete.
+  them with pause, delete and the next date each will book.
+- A repeat only becomes a queued attempt when its window is near, so
+  `/scheduled` also lists what is coming from your repeats but not set up yet —
+  otherwise the screen sits empty for days and looks broken.
 - `/bookings` shows what is on now or coming up; `/bookings all` opens the
   history. Finished bookings are kept only to work out your usual spots for
   `/mostused`.
