@@ -361,11 +361,17 @@ async def checkin(email: str, code: str) -> tuple[bool, str]:
 
 
 async def checkout(email: str, code: str) -> tuple[bool, str]:
-    """End a booking you're currently checked in to, freeing the space.
+    """Free the space, whether or not you ever checked in.
 
-    POST /r/checkout, the mirror of check-in. This is the only self-service
-    way to release a booking without the emailed cancellation link - and it
-    only applies once the booking has started.
+    POST /r/checkout with the same two things check-in wants: the booking's
+    email and its code. On this install checking out *is* cancelling - it
+    works before the booking starts as well as during it, so this is the
+    normal way to drop a booking, not a last resort.
+
+    (An earlier version of this docstring claimed it only worked once the
+    booking had started. That was wrong, and it misled a later reader into
+    telling the user they needed the emailed cancellation link. The link is
+    only a fallback for a booking whose code the bot never learned.)
     """
     async with _client() as client:
         resp = await client.post(
