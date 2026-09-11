@@ -111,10 +111,7 @@ GROUP_COMMANDS = [
     ("groupbook", "Split a long library booking across members"),
 ]
 
-KEYBOARD_LABELS = {
-    "📅 Schedule": "schedule",
-    "📚 Library": "library",
-}
+KEYBOARD_LABELS = flows.KEYBOARD_LABELS      # defined there so both halves see it
 
 HELP = (
     "I am two tools in one bot.\n\n"
@@ -1223,6 +1220,16 @@ async def _catalogue_watch(app) -> None:
         log.info("Catalogue: a booking is about to fire, so the look at the "
                  "library waits for the next start.")
         return
+    # Opening hours first: the grid is public, so this needs no login and no
+    # browser, and it is the only way to learn a weekday the site had not
+    # published last time anyone looked.
+    try:
+        learned = await catalog.refresh_hours()
+        if learned:
+            log.info("Catalogue: %d more opening times observed.", learned)
+    except Exception:
+        log.warning("could not observe opening hours", exc_info=True)
+
     age = storage.durable_age_days("category_meta")
     deep = age is None or age >= config.CATALOG_MAX_AGE_DAYS
     row = storage.conn().execute(

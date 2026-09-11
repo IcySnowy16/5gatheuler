@@ -101,6 +101,20 @@ The slow pass — re-reading every desk name and policy — waits for
 `/refreshcatalog full` the slow one. Both rewrite the seed if anything changed,
 so the correction can be committed for every other machine.
 
+**Opening hours are observed, not assumed — and the bot says which.** The
+availability grid is public, so at every startup the bot looks a few days
+ahead and notes when each category really opens. Those observations accumulate
+and are never reset: a day-of category like Arrakis only publishes a day or
+two ahead, so it learns one weekday per run, while a 30-day category fills in
+all seven at once. Where a weekday has not been seen, the Scheduled screen
+says so rather than pretending:
+
+```
+Wed 16 Sep, 120 min - which slot?
+(Open 08:30-21:00 - the usual hours. That day is not published yet, so I
+ have not checked it.)
+```
+
 **`/developer`** answers "is this machine even running the new code?" — it
 names the branch, the commit and when it was checked out, the catalogue's size
 and age, and whether the grid is live.

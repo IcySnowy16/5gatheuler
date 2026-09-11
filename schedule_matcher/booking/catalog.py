@@ -109,6 +109,54 @@ def hours_for(lid: int, gid: int, day: date) -> tuple[time, time] | None:
             datetime.strptime(hours[1], "%H:%M").time())
 
 
+async def refresh_hours(days: int = 4) -> int:
+    """Watch the public grid and note when each category really opens.
+
+    No login: the availability grid is public, so this can run on any machine
+    at any time. It matters because `DEFAULT_HOURS` is only an assumption -
+    the site publishes a day or two ahead for the day-of categories, so the
+    only way to know Tuesday's hours is to look on a Monday. Every look adds a
+    weekday; nothing is ever forgotten.
+
+    Returns how many category-weekdays were learned that were not known.
+    """
+    from . import libcal
+
+    meta = _meta()
+    learned = 0
+    for key, entry in meta.items():
+        lid, gid = entry.get("lid"), entry.get("gid")
+        if not (lid and gid):
+            continue
+        hours = dict(entry.get("hours") or {})
+        for n in range(1, days + 1):        # never today: it is half over
+            day = date.today() + timedelta(days=n)
+            weekday = str(day.weekday())
+            if weekday in hours:
+                continue                    # already seen this weekday
+            try:
+                grid = await libcal.fetch_grid(lid, gid, day)
+            except Exception:
+                continue
+            if not grid:
+                continue                    # not published that far ahead yet
+            cells = [c for cs in grid.values() for c in cs]
+            hours[weekday] = [f"{min(c.start for c in cells):%H:%M}",
+                              f"{max(c.end for c in cells):%H:%M}"]
+            learned += 1
+        if hours != (entry.get("hours") or {}):
+            entry["hours"] = hours
+    if learned:
+        save(meta)
+        log.info("catalogue: learned %d more opening times from the grid", learned)
+    return learned
+
+
+def hours_measured(lid: int, gid: int, day: date) -> bool:
+    """Has this weekday actually been seen, or is it the usual assumption?"""
+    return str(day.weekday()) in (get(lid, gid).get("hours") or {})
+
+
 def is_open(lid: int, gid: int, day: date) -> bool:
     return hours_for(lid, gid, day) is not None
 
@@ -197,8 +245,14 @@ def parse_policy(text: str) -> dict:
 
 
 async def learn(user_id: int, username: str, password: str, library: str,
-                label: str, lid: int, gid: int) -> dict:
-    """Everything worth knowing about one category, read off the site."""
+                label: str, lid: int, gid: int, previous: dict | None = None) -> dict:
+    """Everything worth knowing about one category, read off the site.
+
+    `previous` is what was already known. Opening hours are merged into it
+    rather than replacing it: a day-of category only ever publishes a day or
+    two ahead, so any single look sees one or two weekdays. Replacing would
+    mean forgetting Monday every time we look on a Friday.
+    """
     import asyncio
 
     from . import browser, libcal
@@ -225,8 +279,10 @@ async def learn(user_id: int, username: str, password: str, library: str,
             grid_ids = set(await libcal.fetch_grid(lid, gid, date.today()))
         except Exception:
             pass
-    if hours:
-        entry["hours"] = hours
+    if hours or (previous or {}).get("hours"):
+        merged = dict((previous or {}).get("hours") or {})
+        merged.update(hours)
+        entry["hours"] = merged
     names = await asyncio.to_thread(browser.harvest_names, user_id, username,
                                     password, lid, gid)
     if names:
@@ -288,7 +344,8 @@ async def discover(user_id: int, username: str, password: str,
                 meta[key]["category"] = label
             if deep:
                 fresh = await learn(user_id, username, password,
-                                    names.get(lid, ""), label, lid, gid)
+                                    names.get(lid, ""), label, lid, gid,
+                                    previous=meta[key])
                 before = set((meta[key].get("spaces") or {}).values())
                 after = set((fresh.get("spaces") or {}).values())
                 meta[key] = fresh

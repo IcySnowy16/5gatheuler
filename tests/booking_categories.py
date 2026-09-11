@@ -118,6 +118,43 @@ def labels(markup):
     return [b.text for row in markup.inline_keyboard for b in row]
 
 
+async def test_hours_accumulate():
+    """Opening hours must build up, never reset.
+
+    A day-of category publishes a day or two ahead, so any single look sees
+    one or two weekdays. Replacing would mean forgetting Monday whenever the
+    bot happened to look on a Friday - which is how most categories ended up
+    knowing 1 weekday out of 7.
+    """
+    from datetime import date, timedelta
+    from schedule_matcher.booking import catalog
+
+    meta = catalog._meta()
+    key = "3368_11822"
+    meta[key] = {"library": "LWN", "category": "Arrakis", "lid": 3368,
+                 "gid": 11822, "hours": {"0": ["08:30", "21:00"]}}
+    catalog.save(meta)
+
+    entry = dict(catalog.get(3368, 11822))
+    merged = dict(entry.get("hours") or {})
+    merged.update({"2": ["08:30", "21:00"]})          # what a later look sees
+    entry["hours"] = merged
+    meta = catalog._meta(); meta[key] = entry; catalog.save(meta)
+
+    hours = catalog.get(3368, 11822).get("hours") or {}
+    check("hours: a later look keeps the earlier weekday",
+          set(hours) == {"0", "2"}, sorted(hours))
+
+    monday = date.today() + timedelta(days=(0 - date.today().weekday()) % 7)
+    tuesday = monday + timedelta(days=1)
+    check("hours: a seen weekday is reported as measured",
+          catalog.hours_measured(3368, 11822, monday))
+    check("hours: an unseen weekday is reported as assumed",
+          not catalog.hours_measured(3368, 11822, tuesday))
+    check("hours: an unseen weekday still answers with the usual hours",
+          catalog.hours_for(3368, 11822, tuesday) is not None)
+
+
 async def main():
     storage.save_user(UID, ntu_username=credstore.encrypt("u"),
                       ntu_password=credstore.encrypt("p"),
@@ -137,6 +174,8 @@ async def main():
     known = {(int(e["lid"]), int(e["gid"])) for e in catalog.all_categories()}
     check("stale cache: nothing the catalogue knows is missing",
           not known - set(offered), known - set(offered))
+
+    await test_hours_accumulate()
 
     # 2. every mode must show the same categories
     per_mode = {}

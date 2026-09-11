@@ -20,6 +20,15 @@ import logging
 LIBRARY = "library"
 SCHEDULE = "schedule"
 
+# The two buttons that are always under the message box. They live here
+# because both halves need to recognise them: tapping one means "take me
+# somewhere else", which has to end any question the other half was waiting
+# to have answered.
+KEYBOARD_LABELS = {
+    "📅 Schedule": SCHEDULE,
+    "📚 Library": LIBRARY,
+}
+
 TOOL_NAMES = {LIBRARY: "library booking", SCHEDULE: "schedule matcher"}
 
 log = logging.getLogger(__name__)

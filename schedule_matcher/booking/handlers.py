@@ -617,9 +617,14 @@ async def _r_range(query, context, bk):
             return
         items = [(f"{s:%H:%M}-{(s + dur):%H:%M}", f"bk|rg|{s:%H%M}")
                  for s in options]
+        chosen = bk["locations"][bk["loc"]].categories[bk["cat"]]
+        measured = catalog.hours_measured(chosen.lid, chosen.gid, bk["day"])
         await query.edit_message_text(
             f"{bk['day']:%a %d %b}, {bk['dur']} min - which slot?\n"
-            f"(Open {opens:%H:%M}-{closes:%H:%M}.)"
+            f"(Open {opens:%H:%M}-{closes:%H:%M}"
+            + (" - seen on the site." if measured else
+               " - the usual hours. That day is not published yet, so I have "
+               "not checked it.") + ")"
             + await _sched_availability(bk),
             reply_markup=_kb(items, per_row=3, bk=bk))
 
@@ -2717,7 +2722,35 @@ async def _pasted_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     return True
 
 
+# Anything the bot is waiting to be typed. A wait that cannot be walked away
+# from is worse than no wait at all: one was left over after a failed cancel,
+# and every later message - including a tap on the Library keyboard button -
+# was read as a cancellation link.
+WAITING_FLAGS = ("awaiting_cancel_link", "awaiting_fire_time",
+                 "awaiting_until_date", "setup_step")
+
+ESCAPE_WORDS = {"cancel", "stop", "nevermind", "never mind", "forget it"}
+
+
+def stop_waiting(context, why: str = "") -> str | None:
+    """Forget whatever the bot was waiting to be typed."""
+    dropped = [f for f in WAITING_FLAGS if context.user_data.pop(f, None) is not None]
+    if not dropped:
+        return None
+    log.info("dropped pending input %s (%s)", dropped, why or "superseded")
+    return dropped[0]
+
+
 async def on_private_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (update.effective_message.text or "").strip()
+
+    # A menu button is not an answer to a question - it is somebody leaving.
+    if text in flows.KEYBOARD_LABELS or text.lower() in ESCAPE_WORDS:
+        if stop_waiting(context, f"user sent {text!r}"):
+            await update.effective_message.reply_text(
+                "Stopped waiting for that - carry on.")
+        return
+
     for handler in (_setup_input, _fire_time_input, _until_date_input,
                     _cancel_link_input, _pasted_email_input):
         if await handler(update, context):
