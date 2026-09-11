@@ -78,6 +78,7 @@ DEV_MENU = {
         ("Spaces I'm holding", "/holds"),
         ("How long chopes last", "/holdtime"),
         ("Diagnostics", "/developer"),
+        ("Check this machine", "/selfcheck"),
         ("Developer mode on/off", "/dev"),
     ]),
 }
@@ -1163,7 +1164,7 @@ def _menu_actions():
         "edit": cmd_edit, "dev": cmd_dev,
         "availability": bh.cmd_availability, "mostused": bh.cmd_mostused,
         "chope": bh.cmd_chope, "holdtime": bh.cmd_holdtime,
-        "developer": bh.cmd_developer,
+        "developer": bh.cmd_developer, "selfcheck": bh.cmd_selfcheck,
         "refreshcatalog": bh.cmd_refreshcatalog,
         "extendedbooking": bh.cmd_extendedbooking,
     }

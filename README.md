@@ -115,9 +115,16 @@ Wed 16 Sep, 120 min - which slot?
  have not checked it.)
 ```
 
-**`/developer`** answers "is this machine even running the new code?" — it
-names the branch, the commit and when it was checked out, the catalogue's size
-and age, and whether the grid is live.
+**`/selfcheck`** is how you compare two machines. It makes the bot examine
+*itself* — the commit it is running, its own database's tables and columns, how
+many categories and observed opening hours it holds, what its picker actually
+offers, whether a login, a browser and a bot inbox are present — and marks each
+line OK or BAD. A rehearsal on the machine where the code was written proves
+nothing about the machine that runs it, so ask the machine.
+
+If no `OWNER_ID` is set, `/selfcheck` still answers (and tells you your own id),
+because a bot nobody owns is exactly the one whose diagnostics you cannot
+otherwise reach. `/developer` adds the log tail and recent failures.
 
 > **One bot, one machine.** Two copies polling the same `TELEGRAM_TOKEN` fight
 > over updates and both misbehave. Stop the old one first, or give the second

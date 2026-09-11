@@ -2482,6 +2482,118 @@ def _write_seed(meta: dict) -> str:
         return "(Saved here, but I could not update catalog_seed.json.)"
 
 
+async def cmd_selfcheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Have the bot examine itself and report, in one message.
+
+    A rehearsal on the machine where the code was written proves nothing about
+    the machine that runs it: different database, different catalogue,
+    possibly different code if a synced folder has not caught up. This asks
+    the running bot the same questions and shows its own answers, so two
+    machines can be compared line for line.
+    """
+    if not await _require_private(update):
+        return
+    user_id = update.effective_user.id
+    # When nobody is configured as owner there are no diagnostics at all -
+    # which is exactly the moment somebody needs them. So an unconfigured bot
+    # answers anyone, and says how to lock it down.
+    unowned = not config.OWNER_ID and not storage.list_developers()
+    if not (unowned or storage.is_developer(user_id)
+            or (config.OWNER_ID and user_id == config.OWNER_ID)):
+        return
+
+    lines, bad = [], 0
+    if unowned:
+        lines.append(f"No OWNER_ID is set, so anyone can run this. Yours is "
+                     f"{user_id} - put OWNER_ID={user_id} in .env to claim the "
+                     "bot and get the developer menu.")
+        lines.append("")
+
+    def row(name, ok, detail=""):
+        nonlocal bad
+        bad += not ok
+        lines.append(f"{'OK  ' if ok else 'BAD '} {name}" + (f" - {detail}" if detail else ""))
+
+    # --- what is running -------------------------------------------------
+    lines.append(f"Code: {config.code_version()}")
+    lines.append(f"Data: {config.HOME}")
+    db = config.HOME / "schedule_matcher.db"
+    lines.append(f"DB:   {db.stat().st_size // 1024} KB" if db.exists() else "DB:   missing")
+    lines.append("")
+
+    # --- the database has everything this code expects -------------------
+    conn = storage.conn()
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    row("tables", {"recurring_rules", "holds", "durable"} <= tables,
+        "missing " + ", ".join(sorted({"recurring_rules", "holds", "durable"} - tables))
+        if not {"recurring_rules", "holds", "durable"} <= tables else "")
+    ev = {c[1] for c in conn.execute("PRAGMA table_info(events)")}
+    row("event columns", {"start_date", "board_msg_id"} <= ev,
+        "run once more to migrate" if not {"start_date", "board_msg_id"} <= ev else "")
+    sb = {c[1] for c in conn.execute("PRAGMA table_info(scheduled_bookings)")}
+    row("scheduled columns", "rule_id" in sb)
+
+    # --- the catalogue ---------------------------------------------------
+    meta = catalog.all_categories()
+    age = storage.durable_age_days("category_meta")
+    row("catalogue", len(meta) >= 25, f"{len(meta)} categories")
+    row("Griffin Booth", any(e.get("category") == "Griffin Booth" for e in meta))
+    row("Humanities seats",
+        sum(1 for e in meta if e.get("lid") == 4906) >= 3,
+        f"{sum(1 for e in meta if e.get('lid') == 4906)} of 3")
+    seen = sum(len(e.get("hours") or {}) for e in meta)
+    lines.append(f"     hours observed: {seen} of {len(meta) * 7} category-weekdays"
+                 + (f", checked {age:.1f}d ago" if age is not None else ""))
+
+    # --- what the picker actually offers ---------------------------------
+    try:
+        locs = await libcal.fetch_locations()
+        offered = [c for loc in locs for c in loc.categories]
+        row("picker", len(offered) >= 25, f"{len(offered)} categories, "
+            f"{len(locs)} libraries")
+        row("no dead entries", not any(c.gid == 0 for c in offered))
+    except Exception as exc:
+        row("picker", False, f"{type(exc).__name__}")
+
+    # --- the things a booking needs --------------------------------------
+    row("your login saved", _profile(user_id) is not None,
+        "run /setup" if _profile(user_id) is None else "")
+    row("bot inbox", bool(storage.durable_get("botmail_address")),
+        "not set - /botemail lets me read confirmation codes myself"
+        if not storage.durable_get("botmail_address") else
+        str(storage.durable_get("botmail_address")))
+    try:
+        from pathlib import Path
+        pw = Path.home() / "AppData" / "Local" / "ms-playwright"
+        row("browser", pw.exists() and any(pw.glob("chromium*")),
+            "run: python -m playwright install chromium" if not pw.exists() else "")
+    except Exception:
+        pass
+    row("availability grid", True,
+        config.WEBAPP_URL or "off - the tap-through calendar is used")
+
+    # --- what is queued --------------------------------------------------
+    jobs = conn.execute(
+        "SELECT COUNT(*) n FROM scheduled_bookings WHERE status IN"
+        " ('pending','retrying')").fetchone()["n"]
+    rules_n = conn.execute(
+        "SELECT COUNT(*) n FROM recurring_rules WHERE status='active'").fetchone()["n"]
+    live = len(storage.list_bookings(user_id))
+    lines.append(f"     queued: {jobs} scheduled, {rules_n} repeating, {live} live bookings")
+    recent = storage.recent_errors(3)
+    if recent:
+        lines.append("     recent failures:")
+        lines += [f"       {e['at'][5:]} {e['feature']}: {e['message'][:60]}"
+                  for e in recent]
+
+    verdict = ("Everything this build needs is here."
+               if not bad else
+               f"{bad} thing(s) look wrong - the lines marked BAD above.")
+    await update.effective_message.reply_text(
+        "\n".join(lines) + "\n\n" + verdict)
+
+
 async def cmd_developer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Owner-only diagnostics. Silently ignored for anyone not on the list."""
     if (update.effective_chat.type != "private"
@@ -3139,6 +3251,7 @@ def register(application) -> None:
     application.add_handler(CallbackQueryHandler(on_availability_callback,
                                                  pattern=r"^av\|"))
     application.add_handler(CommandHandler("developer", cmd_developer))
+    application.add_handler(CommandHandler("selfcheck", cmd_selfcheck))
     application.add_handler(CommandHandler("refreshcatalog", cmd_refreshcatalog))
     application.add_handler(CallbackQueryHandler(on_booking_callback, pattern=r"^bk\|"))
     application.add_handler(MessageHandler(
