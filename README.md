@@ -103,7 +103,10 @@ so the correction can be committed for every other machine.
 
 **Opening hours are observed, not assumed — and the bot says which.** The
 availability grid is public, so at every startup the bot looks a few days
-ahead and notes when each category really opens. Those observations accumulate
+ahead and notes when each category really opens — and so does every grid
+anyone opens in `/book` or `/schedulebook`, which is free information. Picking
+a day the site has published turns that weekday from "the usual hours" into
+"seen on the site" and stores it, so the next person is told the truth. Those observations accumulate
 and are never reset: a day-of category like Arrakis only publishes a day or
 two ahead, so it learns one weekday per run, while a 30-day category fills in
 all seven at once. Where a weekday has not been seen, the Scheduled screen

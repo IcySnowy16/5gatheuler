@@ -232,7 +232,47 @@ async def fetch_grid(lid: int, gid: int, day: date,
         rooms.setdefault(cell.item_id, []).append(cell)
     for cells in rooms.values():
         cells.sort(key=lambda c: c.start)
+    _note_hours(lid, gid, day, rooms)
     return rooms
+
+
+def _note_hours(lid: int, gid: int, day: date, rooms: dict) -> None:
+    """Remember when this category really opened, since we just saw it.
+
+    Opening hours are otherwise an assumption for any weekday the site had not
+    published when the bot last looked. Every grid anyone actually asks for is
+    a free observation - opening a day in /book or /schedulebook now teaches
+    the catalogue that weekday, so the "usual hours" note turns into "seen on
+    the site" the moment somebody looks.
+
+    Today is skipped: its grid only carries what is left of it, so learning
+    from it at 3pm would record the library as opening at 3pm.
+    """
+    if not rooms or day <= date.today():
+        return
+    cells = [c for cs in rooms.values() for c in cs]
+    if not cells:
+        return
+    span = [f"{min(c.start for c in cells):%H:%M}",
+            f"{max(c.end for c in cells):%H:%M}"]
+    try:
+        from . import catalog
+
+        meta = catalog._meta()
+        entry = meta.get(f"{lid}_{gid}")
+        if entry is None:
+            return
+        hours = dict(entry.get("hours") or {})
+        if hours.get(str(day.weekday())) == span:
+            return                       # already knew, and it has not changed
+        hours[str(day.weekday())] = span
+        entry["hours"] = hours
+        meta[f"{lid}_{gid}"] = entry
+        catalog.save(meta)
+        log.info("hours learned from a real look: %s %s %s",
+                 entry.get("category", f"{lid}_{gid}"), f"{day:%a}", span)
+    except Exception:                    # never break a booking over bookkeeping
+        log.debug("could not record opening hours", exc_info=True)
 
 
 async def days_with_availability(lid: int, gid: int, days: int) -> dict[date, dict[int, list[Cell]]]:

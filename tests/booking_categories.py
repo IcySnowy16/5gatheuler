@@ -118,6 +118,50 @@ def labels(markup):
     return [b.text for row in markup.inline_keyboard for b in row]
 
 
+async def test_hours_learned_on_sight():
+    """Opening a day in the flow records that weekday's real hours.
+
+    Offline: a fabricated grid is handed straight to the recorder, because the
+    point under test is that a grid anyone looks at teaches the catalogue -
+    not that the network works.
+    """
+    from datetime import date, datetime, timedelta
+    from schedule_matcher.booking import catalog, libcal
+
+    lid, gid = 3368, 11822
+    target = date.today() + timedelta(days=3)
+    meta = catalog._meta()
+    meta[f"{lid}_{gid}"] = {"library": "LWN", "category": "Arrakis",
+                            "lid": lid, "gid": gid, "hours": {}}
+    catalog.save(meta)
+    check("learned hours: unknown weekday starts assumed",
+          not catalog.hours_measured(lid, gid, target))
+
+    def cell(h, m, dur=30):
+        start = datetime.combine(target, datetime.min.time()) + timedelta(hours=h, minutes=m)
+        return libcal.Cell(start=start, end=start + timedelta(minutes=dur),
+                           item_id=1, checksum="x", state=libcal.FREE)
+
+    libcal._note_hours(lid, gid, target, {1: [cell(8, 30), cell(20, 30)]})
+    check("learned hours: the weekday is now measured",
+          catalog.hours_measured(lid, gid, target))
+    span = (catalog.get(lid, gid).get("hours") or {}).get(str(target.weekday()))
+    check("learned hours: the span is what the grid showed",
+          span == ["08:30", "21:00"], span)
+
+    # today is half over, so it must never set the opening time
+    today_cells = {1: [cell(15, 0)]}
+    libcal._note_hours(lid, gid, date.today(), today_cells)
+    check("learned hours: today is never used",
+          str(date.today().weekday()) not in (catalog.get(lid, gid).get("hours") or {})
+          or date.today().weekday() == target.weekday())
+
+    # an unknown category must not be invented
+    libcal._note_hours(9999, 9999, target, {1: [cell(8, 30)]})
+    check("learned hours: an unknown category is left alone",
+          catalog.get(9999, 9999) == {})
+
+
 async def test_hours_accumulate():
     """Opening hours must build up, never reset.
 
@@ -176,6 +220,7 @@ async def main():
           not known - set(offered), known - set(offered))
 
     await test_hours_accumulate()
+    await test_hours_learned_on_sight()
 
     # 2. every mode must show the same categories
     per_mode = {}
