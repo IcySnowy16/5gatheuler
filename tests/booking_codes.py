@@ -76,6 +76,7 @@ async def probe(kind):
 
 async def test_code_is_asked_for_early():
     """The code is the one thing the bot cannot work out, so it must ask."""
+    import re
     from datetime import datetime, timedelta
     from schedule_matcher import storage
     from schedule_matcher.booking import scheduler
@@ -116,6 +117,40 @@ async def test_code_is_asked_for_early():
     Bot.sent.clear()
     await scheduler._code_nag_scan(App())
     check("code reminder: never asks twice", not Bot.sent, Bot.sent)
+
+    # A booking made minutes before it starts cannot wait for the email: the
+    # check-in gate opens 5 minutes before and shuts 15 after.
+    Bot.sent.clear()
+    # Read the clock here rather than at the top of the test: the checks above
+    # take long enough that a minute counted from there is already a minute
+    # out, which made this assertion fail or pass depending on the machine.
+    fresh = datetime.now()
+    soon = storage.add_booking(uid, "LWN", "Learning Pod", "Pod soon", 46002,
+                               fresh + timedelta(minutes=4),
+                               fresh + timedelta(minutes=124))
+    await scheduler._code_nag_scan(App())
+    check("code reminder: a booking starting soon is asked about at once",
+          len(Bot.sent) == 1, Bot.sent)
+    check("code reminder: and it says how long there is",
+          re.search(r"starts in [1-9]\d* min", Bot.sent[0] if Bot.sent else ""),
+          Bot.sent)
+
+    Bot.sent.clear()
+    started = storage.add_booking(uid, "LWN", "Learning Pod", "Pod started", 46002,
+                                  datetime.now() - timedelta(minutes=3),
+                                  datetime.now() + timedelta(minutes=117))
+    await scheduler._code_nag_scan(App())
+    check("code reminder: one already running says so",
+          "already started" in (Bot.sent[0] if Bot.sent else ""), Bot.sent)
+
+    row = storage.get_booking(soon)
+    check("code reminder: the check-in scan will not repeat it",
+          row["checkin_nagged"] == 1 and row["code_nagged"] == 1,
+          f"{row['checkin_nagged']} {row['code_nagged']}")
+    check("code reminder: a scheduled job that has not fired has no row to nag",
+          storage.conn().execute(
+              "SELECT COUNT(*) c FROM bookings WHERE id=?", (started + 999,)
+          ).fetchone()["c"] == 0)
 
 
 async def test_checkin_names_the_booking():

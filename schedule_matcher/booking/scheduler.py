@@ -153,9 +153,26 @@ async def _code_nag_scan(application) -> None:
     """
     if config.CODE_NAG_MINUTES <= 0:
         return
+    now = datetime.now()
     for b in storage.bookings_missing_code(config.CODE_NAG_MINUTES):
-        storage.update_booking(b["id"], code_nagged=1)
         start = datetime.strptime(b["start_ts"], FMT)
+        # One ask, not two: the check-in scan would otherwise repeat this a few
+        # minutes later for anything starting soon.
+        storage.update_booking(b["id"], code_nagged=1, checkin_nagged=1)
+        soon = start - now
+        if soon <= timedelta(minutes=config.CODE_NAG_MINUTES):
+            secs = soon.total_seconds()
+            # Round up, and only claim it has started when it really has -
+            # "already started" about a booking 55 seconds away is a lie.
+            urgency = ("It has already started" if secs < 0
+                       else f"It starts in {max(1, round(secs / 60))} min")
+            await application.bot.send_message(
+                b["user_id"],
+                f"{urgency} and I have no check-in code for {b['room_name']}.\n\n"
+                "Send /code ABC123 from the confirmation email now - check-in "
+                "shuts 15 min after the start, and the same code is what "
+                "cancels it if you change your mind.")
+            continue
         await application.bot.send_message(
             b["user_id"],
             f"I still have no check-in code for {b['room_name']} on "
@@ -174,7 +191,7 @@ async def _checkin_scan(application) -> None:
         email = user["email"] if user else None
         if not b["checkin_code"] or not email:
             if now >= start - timedelta(minutes=5) and not b["checkin_nagged"]:
-                storage.update_booking(b["id"], checkin_nagged=1)
+                storage.update_booking(b["id"], checkin_nagged=1, code_nagged=1)
                 missing = "check-in code" if email else "email (/email) and check-in code"
                 await bot.send_message(
                     b["user_id"],

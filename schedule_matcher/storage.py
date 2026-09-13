@@ -502,13 +502,20 @@ def bookings_missing_code(after_minutes: int) -> list[sqlite3.Row]:
     only five minutes before the start - which is all the bot used to do -
     leaves a booking made for next week unusable for a week.
     """
+    wait = int(after_minutes)
     return conn().execute(
         "SELECT * FROM bookings WHERE checkin_code IS NULL"
         " AND status IN ('booked','pending')"
         " AND end_ts >= datetime('now','localtime')"
         " AND COALESCE(code_nagged, 0) = 0"
-        " AND created_at <= datetime('now','localtime', ?)"
-        " ORDER BY start_ts", (f"-{int(after_minutes)} minutes",)).fetchall()
+        # Normally give the email time to arrive. But a booking that starts
+        # within that same window cannot afford the wait: the check-in gate
+        # opens 5 minutes before the start and shuts 15 after it, so asking
+        # later would land inside - or past - the only chance to use it.
+        " AND (created_at <= datetime('now','localtime', ?)"
+        "      OR start_ts <= datetime('now','localtime', ?))"
+        " ORDER BY start_ts",
+        (f"-{wait} minutes", f"+{wait} minutes")).fetchall()
 
 
 def bookings_needing_checkin() -> list[sqlite3.Row]:
